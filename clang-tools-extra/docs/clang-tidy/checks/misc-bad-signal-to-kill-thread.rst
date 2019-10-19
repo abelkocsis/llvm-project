@@ -4,7 +4,9 @@ misc-bad-signal-to-kill-thread
 ==============================
 
 Warn on uses of the ``pthread_kill`` function when thread is 
-terminated by ``SIGTERM`` signal.
+terminated by ``SIGTERM`` signal. Use any signal except
+``SIGTERM`` or ``SIGKILL``.
+
 .. code-block: c++
 
     pthread_kill(thread, SIGTERM);

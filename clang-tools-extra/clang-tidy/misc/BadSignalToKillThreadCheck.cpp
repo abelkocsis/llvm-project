@@ -25,17 +25,14 @@ void BadSignalToKillThreadCheck::registerMatchers(MatchFinder *Finder) {
       this);
 }
 
-namespace {
 static Preprocessor *PP;
-} // namespace
 
 void BadSignalToKillThreadCheck::check(const MatchFinder::MatchResult &Result) {
-
   Preprocessor::macro_iterator It = PP->macro_begin();
   while (It != PP->macro_end() && !SigtermValue.hasValue()) {
     if (It->first->getName() == "SIGTERM") {
-      const auto *MI = PP->getMacroInfo(It->first);
-      const auto &T = MI->tokens().back();
+      const MacroInfo *MI = PP->getMacroInfo(It->first);
+      const Token &T = MI->tokens().back();
       StringRef ValueStr = StringRef(T.getLiteralData(), T.getLength());
       llvm::APInt IntValue;
       ValueStr.getAsInteger(10, IntValue);

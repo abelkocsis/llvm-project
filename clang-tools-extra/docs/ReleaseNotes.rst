@@ -73,13 +73,6 @@ Improvements to clang-tidy
   Finds instances where variables with static storage are initialized
   dynamically in header files.
 
-- New :doc:`misc-signal-terminated-thread
-  <clang-tidy/checks/misc-signal-terminated-thread>` check.
-
-  Do not send an uncaught signal to kill a thread because the signal kills the entire process, not just the individual thread. 
-  To learn more about this rule please visit the following page:
-  https://wiki.sei.cmu.edu/confluence/display/c/POS44-C.+Do+not+use+signals+to+terminate+threads
-
 - New :doc:`bugprone-infinite-loop
   <clang-tidy/checks/bugprone-infinite-loop>` check.
 
@@ -121,6 +114,14 @@ Improvements to clang-tidy
 
   Finds historical use of ``unsigned`` to hold vregs and physregs and rewrites
   them to use ``Register``
+
+- New :doc:`misc-bad-signal-to-kill-thread
+  <clang-tidy/checks/misc-bad-signal-to-kill-thread>` check.
+
+  Finds function calls when an uncaught signal try to kill a thread and
+  the signal kills the entire process, not just the individual thread. 
+  To learn more about this rule please visit the following page:
+  https://wiki.sei.cmu.edu/confluence/display/c/POS44-C.+Do+not+use+signals+to+terminate+threads
 
 - New :doc:`objc-missing-hash
   <clang-tidy/checks/objc-missing-hash>` check.
