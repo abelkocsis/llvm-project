@@ -282,6 +282,7 @@ Clang-Tidy Checks
    llvm-prefer-isa-or-dyn-cast-in-conditionals
    llvm-prefer-register-over-unsigned
    llvm-twine-local
+   misc-bad-signal-to-kill-thread
    misc-definitions-in-headers
    misc-misplaced-const
    misc-new-delete-overloads
