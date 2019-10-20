@@ -28,7 +28,7 @@ void BadSignalToKillThreadCheck::registerMatchers(MatchFinder *Finder) {
 static Preprocessor *PP;
 
 void BadSignalToKillThreadCheck::check(const MatchFinder::MatchResult &Result) {
-  Preprocessor::macro_iterator It = PP->macro_begin();
+  auto It = PP->macro_begin();
   while (It != PP->macro_end() && !SigtermValue.hasValue()) {
     if (It->first->getName() == "SIGTERM") {
       const MacroInfo *MI = PP->getMacroInfo(It->first);
