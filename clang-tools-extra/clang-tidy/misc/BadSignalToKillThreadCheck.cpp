@@ -49,7 +49,7 @@ void BadSignalToKillThreadCheck::check(const MatchFinder::MatchResult &Result) {
       Result.Nodes.getNodeAs<IntegerLiteral>("integer-literal");
   if (MatchedIntLiteral->getValue() == *SigtermValue) {
     diag(MatchedExpr->getBeginLoc(),
-         "Thread should not be terminated by signal.");
+         "Thread should not be terminated by SIGTERM signal.");
   }
 }
 
