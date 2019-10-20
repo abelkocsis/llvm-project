@@ -3,9 +3,11 @@
 misc-bad-signal-to-kill-thread
 ==============================
 
-Warn on uses of the ``pthread_kill`` function when thread is 
-terminated by ``SIGTERM`` signal. Use any signal except
-``SIGTERM`` or ``SIGKILL``.
+Finds ``pthread_kill`` function calls when thread is terminated by uncaught
+``SIGTERM`` signal and the signal kills the entire process, not just the
+individual thread. Use any signal except ``SIGTERM`` or ``SIGKILL``.
+To learn more about this rule please visit the following page:
+https://wiki.sei.cmu.edu/confluence/display/c/POS44-C.+Do+not+use+signals+to+terminate+threads
 
 .. code-block: c++
 

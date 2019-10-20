@@ -15,10 +15,8 @@ namespace clang {
 namespace tidy {
 namespace misc {
 
-/// Do not send an uncaught signal to kill a thread because the signal kills the
-/// entire process, not just the individual thread. To learn more about this
-/// rule see:
-/// https://wiki.sei.cmu.edu/confluence/display/c/POS44-C.+Do+not+use+signals+to+terminate+threads
+/// Finds ``pthread_kill`` function calls when thread is terminated by
+/// uncaught ``SIGTERM`` signal.
 /// For the user-facing documentation see:
 /// http://clang.llvm.org/extra/clang-tidy/checks/misc-bad-signal-to-kill-thread.html
 class BadSignalToKillThreadCheck : public ClangTidyCheck {

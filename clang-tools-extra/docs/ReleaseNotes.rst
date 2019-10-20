@@ -118,10 +118,8 @@ Improvements to clang-tidy
 - New :doc:`misc-bad-signal-to-kill-thread
   <clang-tidy/checks/misc-bad-signal-to-kill-thread>` check.
 
-  Finds function calls when an uncaught signal try to kill a thread and
-  the signal kills the entire process, not just the individual thread. 
-  To learn more about this rule please visit the following page:
-  https://wiki.sei.cmu.edu/confluence/display/c/POS44-C.+Do+not+use+signals+to+terminate+threads
+  Finds ``pthread_kill`` function calls when thread is terminated by
+  uncaught ``SIGTERM`` signal.
 
 - New :doc:`objc-missing-hash
   <clang-tidy/checks/objc-missing-hash>` check.
