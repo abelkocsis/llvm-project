@@ -28,21 +28,28 @@ void BadSignalToKillThreadCheck::registerMatchers(MatchFinder *Finder) {
 static Preprocessor *PP;
 
 void BadSignalToKillThreadCheck::check(const MatchFinder::MatchResult &Result) {
-  auto It = PP->macro_begin();
-  while (It != PP->macro_end() && !SigtermValue.hasValue()) {
-    if (It->first->getName() == "SIGTERM") {
-      const MacroInfo *MI = PP->getMacroInfo(It->first);
-      const Token &T = MI->tokens().back();
-      StringRef ValueStr = StringRef(T.getLiteralData(), T.getLength());
-      llvm::APInt IntValue;
-      ValueStr.getAsInteger(10, IntValue);
-      SigtermValue = IntValue.getZExtValue();
-    }
+  const auto IsSigterm = [](const auto &KeyValue) -> bool {
+  return KeyValue.first->getName() == "SIGTERM";
+};
+const auto TryExpandAsInteger =
+    [PP = PP](Preprocessor::macro_iterator It) -> Optional<unsigned> {
+  if (It == PP->macro_end())
+    return llvm::None;
+  const MacroInfo *MI = PP->getMacroInfo(It->first);
+  const Token &T = MI->tokens().back();
+  StringRef ValueStr = StringRef(T.getLiteralData(), T.getLength());
 
-    ++It;
-  }
-  if (!SigtermValue)
-    return;
+  llvm::APInt IntValue;
+  constexpr unsigned AutoSenseRadix = 0;
+  if (ValueStr.getAsInteger(AutoSenseRadix, IntValue))
+    return llvm::None;
+  return IntValue.getZExtValue();
+};
+
+const auto SigtermMacro = llvm::find_if(PP->macros(), IsSigterm);
+
+if (!SigtermValue && !(SigtermValue = TryExpandAsInteger(SigtermMacro)))
+  return;
 
   const auto *MatchedExpr = Result.Nodes.getNodeAs<Expr>("thread-kill");
   const auto *MatchedIntLiteral =

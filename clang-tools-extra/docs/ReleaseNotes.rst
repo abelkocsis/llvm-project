@@ -119,7 +119,7 @@ Improvements to clang-tidy
   <clang-tidy/checks/misc-bad-signal-to-kill-thread>` check.
 
   Finds ``pthread_kill`` function calls when thread is terminated by
-  uncaught ``SIGTERM`` signal.
+  ``SIGTERM`` signal.
 
 - New :doc:`objc-missing-hash
   <clang-tidy/checks/objc-missing-hash>` check.

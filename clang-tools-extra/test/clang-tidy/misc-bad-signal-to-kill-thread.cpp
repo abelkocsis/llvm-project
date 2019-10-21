@@ -33,7 +33,6 @@ int main() {
   if ((result = pthread_kill(thread, 0xF)) != 0) {
     // CHECK-MESSAGES: :[[@LINE-1]]:17: warning: Thread should not be terminated by SIGTERM signal. [misc-bad-signal-to-kill-thread]
   }
-  
 
   return 0;
 }

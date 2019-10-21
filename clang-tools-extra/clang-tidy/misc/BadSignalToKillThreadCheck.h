@@ -16,7 +16,7 @@ namespace tidy {
 namespace misc {
 
 /// Finds ``pthread_kill`` function calls when thread is terminated by
-/// uncaught ``SIGTERM`` signal.
+/// ``SIGTERM`` signal.
 /// For the user-facing documentation see:
 /// http://clang.llvm.org/extra/clang-tidy/checks/misc-bad-signal-to-kill-thread.html
 class BadSignalToKillThreadCheck : public ClangTidyCheck {
