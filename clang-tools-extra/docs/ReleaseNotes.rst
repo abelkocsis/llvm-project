@@ -67,6 +67,12 @@ The improvements are...
 Improvements to clang-tidy
 --------------------------
 
+- New :doc:`bugprone-bad-signal-to-kill-thread
+  <clang-tidy/checks/bugprone-bad-signal-to-kill-thread>` check.
+
+  Finds ``pthread_kill`` function calls when thread is terminated by
+  ``SIGTERM`` signal.
+
 - New :doc:`bugprone-dynamic-static-initializers
   <clang-tidy/checks/bugprone-dynamic-static-initializers>` check.
 
@@ -114,12 +120,6 @@ Improvements to clang-tidy
 
   Finds historical use of ``unsigned`` to hold vregs and physregs and rewrites
   them to use ``Register``
-
-- New :doc:`misc-bad-signal-to-kill-thread
-  <clang-tidy/checks/misc-bad-signal-to-kill-thread>` check.
-
-  Finds ``pthread_kill`` function calls when thread is terminated by
-  ``SIGTERM`` signal.
 
 - New :doc:`objc-missing-hash
   <clang-tidy/checks/objc-missing-hash>` check.
