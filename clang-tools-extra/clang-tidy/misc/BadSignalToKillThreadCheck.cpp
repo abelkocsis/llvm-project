@@ -28,11 +28,11 @@ void BadSignalToKillThreadCheck::registerMatchers(MatchFinder *Finder) {
 static Preprocessor *PP;
 
 void BadSignalToKillThreadCheck::check(const MatchFinder::MatchResult &Result) {
-  const auto IsSigterm = [](const auto &KeyValue) -> bool {
+  const auto IsSigterm = [](const auto &KeyValue) {
     return KeyValue.first->getName() == "SIGTERM";
   };
   const auto TryExpandAsInteger =
-      [PP = PP](Preprocessor::macro_iterator It) -> Optional<unsigned> {
+      [](Preprocessor::macro_iterator It) -> Optional<unsigned> {
     if (It == PP->macro_end())
       return llvm::None;
     const MacroInfo *MI = PP->getMacroInfo(It->first);
@@ -56,7 +56,7 @@ void BadSignalToKillThreadCheck::check(const MatchFinder::MatchResult &Result) {
       Result.Nodes.getNodeAs<IntegerLiteral>("integer-literal");
   if (MatchedIntLiteral->getValue() == *SigtermValue) {
     diag(MatchedExpr->getBeginLoc(),
-         "Thread should not be terminated by SIGTERM signal.");
+         "thread should not be terminated by raising the 'SIGTERM' signal");
   }
 }
 
