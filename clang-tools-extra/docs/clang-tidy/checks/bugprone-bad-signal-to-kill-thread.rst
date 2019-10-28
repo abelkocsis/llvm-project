@@ -3,9 +3,9 @@
 bugprone-bad-signal-to-kill-thread
 ==============================
 
-Finds ``pthread_kill`` function calls when thread is terminated by 
-``SIGTERM`` signal and the signal kills the entire process, not just the
-individual thread. Use any signal except ``SIGTERM``.
+Finds ``pthread_kill`` function calls when a thread is terminated by 
+raising ``SIGTERM`` signal and the signal kills the entire process, not 
+just the individual thread. Use any signal except ``SIGTERM``.
 
 .. code-block: c++
 

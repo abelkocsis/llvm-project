@@ -70,8 +70,8 @@ Improvements to clang-tidy
 - New :doc:`bugprone-bad-signal-to-kill-thread
   <clang-tidy/checks/bugprone-bad-signal-to-kill-thread>` check.
 
-  Finds ``pthread_kill`` function calls when thread is terminated by
-  ``SIGTERM`` signal.
+  Finds ``pthread_kill`` function calls when a thread is terminated by 
+  raising ``SIGTERM`` signal.
 
 - New :doc:`bugprone-dynamic-static-initializers
   <clang-tidy/checks/bugprone-dynamic-static-initializers>` check.

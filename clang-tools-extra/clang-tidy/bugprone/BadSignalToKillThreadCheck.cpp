@@ -32,7 +32,7 @@ void BadSignalToKillThreadCheck::check(const MatchFinder::MatchResult &Result) {
     return KeyValue.first->getName() == "SIGTERM";
   };
   const auto TryExpandAsInteger =
-      [PP = PP](Preprocessor::macro_iterator It) -> Optional<unsigned> {
+      [](Preprocessor::macro_iterator It) -> Optional<unsigned> {
     if (It == PP->macro_end())
       return llvm::None;
     const MacroInfo *MI = PP->getMacroInfo(It->first);
