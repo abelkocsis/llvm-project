@@ -1,7 +1,7 @@
 .. title:: clang-tidy - bugprone-bad-signal-to-kill-thread
 
 bugprone-bad-signal-to-kill-thread
-==============================
+==================================
 
 Finds ``pthread_kill`` function calls when a thread is terminated by 
 raising ``SIGTERM`` signal and the signal kills the entire process, not 
