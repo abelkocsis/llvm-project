@@ -15,6 +15,7 @@
 #include "../misc/NewDeleteOverloadsCheck.h"
 #include "../misc/NonCopyableObjects.h"
 #include "../misc/StaticAssertCheck.h"
+#include "../misc/SpuriouslyWakeUpFunctionsCheck.h"
 #include "../misc/ThrowByValueCatchByReferenceCheck.h"
 #include "../performance/MoveConstructorInitCheck.h"
 #include "../readability/UppercaseLiteralSuffixCheck.h"
@@ -39,6 +40,9 @@ class CERTModule : public ClangTidyModule {
 public:
   void addCheckFactories(ClangTidyCheckFactories &CheckFactories) override {
     // C++ checkers
+    // CON
+    CheckFactories.registerCheck<misc::SpuriouslyWakeUpFunctionsCheck>(
+        "cert-con54-cpp");
     // DCL
     CheckFactories.registerCheck<PostfixOperatorCheck>(
         "cert-dcl21-cpp");
@@ -71,6 +75,9 @@ public:
         "cert-oop54-cpp");
 
     // C checkers
+    // CON
+    CheckFactories.registerCheck<misc::SpuriouslyWakeUpFunctionsCheck>(
+        "cert-con36-c");
     // DCL
     CheckFactories.registerCheck<misc::StaticAssertCheck>("cert-dcl03-c");
     CheckFactories.registerCheck<readability::UppercaseLiteralSuffixCheck>(

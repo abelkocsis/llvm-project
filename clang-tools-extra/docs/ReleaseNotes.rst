@@ -179,6 +179,13 @@ Improvements to clang-tidy
   Finds non-static member functions that can be made ``const``
   because the functions don't use ``this`` in a non-const way.
 
+- New :doc:`misc-spuriously-wake-up-functions
+  <clang-tidy/checks/misc-spuriously-wake-up-functions>` check.
+
+  Finds ``cnd_wait`` or ``wait`` function calls when the function is not
+  invoked from a loop that checks whether a condition predicate holds or the
+  function has a condition parameter.
+
 - Improved :doc:`modernize-use-override
   <clang-tidy/checks/modernize-use-override>` check.
 

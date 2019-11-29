@@ -84,6 +84,8 @@ Clang-Tidy Checks
    bugprone-unused-return-value
    bugprone-use-after-move
    bugprone-virtual-near-miss
+   cert-con36-c (redirects to misc-spuriously-wake-up-functions) <cert-con36-c>
+   cert-con54-cpp (redirects to misc-spuriously-wake-up-functions) <cert-con54-cpp>
    cert-dcl03-c (redirects to misc-static-assert) <cert-dcl03-c>
    cert-dcl16-c (redirects to readability-uppercase-literal-suffix) <cert-dcl16-c>
    cert-dcl21-cpp
@@ -290,6 +292,7 @@ Clang-Tidy Checks
    misc-non-copyable-objects
    misc-non-private-member-variables-in-classes
    misc-redundant-expression
+   misc-spuriously-wake-up-functions
    misc-static-assert
    misc-throw-by-value-catch-by-reference
    misc-unconventional-assign-operator
