@@ -94,6 +94,16 @@ Improvements to clang-tidy
   Without the null terminator it can result in undefined behaviour when the
   string is read.
 
+- New alias :doc:`cert-con36-c
+  <clang-tidy/checks/cert-con36-c>` to
+  :doc:`misc-spuriously-wake-up-functions
+  <clang-tidy/checks/misc-spuriously-wake-up-functions>` was added.
+
+- New alias :doc:`cert-con54-cpp
+  <clang-tidy/checks/cert-con54-cpp>` to
+  :doc:`misc-spuriously-wake-up-functions
+  <clang-tidy/checks/misc-spuriously-wake-up-functions>` was added.
+
 - New :doc:`cert-mem57-cpp
   <clang-tidy/checks/cert-mem57-cpp>` check.
 
