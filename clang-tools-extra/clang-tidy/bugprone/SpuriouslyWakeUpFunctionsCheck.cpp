@@ -14,7 +14,7 @@ using namespace clang::ast_matchers;
 
 namespace clang {
 namespace tidy {
-namespace misc {
+namespace bugprone {
 
 void SpuriouslyWakeUpFunctionsCheck::registerMatchers(MatchFinder *Finder) {
 
@@ -74,7 +74,6 @@ void SpuriouslyWakeUpFunctionsCheck::registerMatchers(MatchFinder *Finder) {
 
 void SpuriouslyWakeUpFunctionsCheck::check(
     const MatchFinder::MatchResult &Result) {
-
   const auto *MatchedWait = Result.Nodes.getNodeAs<CallExpr>("wait");
   diag(
       MatchedWait->getExprLoc(),
@@ -82,6 +81,6 @@ void SpuriouslyWakeUpFunctionsCheck::check(
       "parameter")
       << MatchedWait->getDirectCallee()->getName();
 }
-} // namespace misc
+} // namespace bugprone
 } // namespace tidy
 } // namespace clang

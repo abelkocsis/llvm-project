@@ -1,4 +1,4 @@
-// RUN: %check_clang_tidy %s misc-spuriously-wake-up-functions %t -- -- -I %S/../../../libcxx/include/
+// RUN: %check_clang_tidy %s bugprone-spuriously-wake-up-functions %t -- -- -I %S/../../../libcxx/include/
 
 #include "chrono"
 #include "condition_variable"
@@ -18,7 +18,7 @@ void consume_list_element(std::condition_variable &condition) {
 
   if (list.next == nullptr) {
     condition.wait(lk);
-    // CHECK-MESSAGES: :[[@LINE-1]]:15: warning: 'wait' should be placed inside a while statement or used with a condition parameter [misc-spuriously-wake-up-functions]
+    // CHECK-MESSAGES: :[[@LINE-1]]:15: warning: 'wait' should be placed inside a while statement or used with a condition parameter [bugprone-spuriously-wake-up-functions]
   }
 
   while (list.next == nullptr) {
@@ -34,7 +34,7 @@ void consume_list_element(std::condition_variable &condition) {
   durtype dur = std::chrono::duration<int, std::milli>();
   if (list.next == nullptr) {
     condition.wait_for(lk, dur);
-    // CHECK-MESSAGES: :[[@LINE-1]]:15: warning: 'wait_for' should be placed inside a while statement or used with a condition parameter [misc-spuriously-wake-up-functions]
+    // CHECK-MESSAGES: :[[@LINE-1]]:15: warning: 'wait_for' should be placed inside a while statement or used with a condition parameter [bugprone-spuriously-wake-up-functions]
   }
   if (list.next == nullptr) {
     condition.wait_for(lk, dur, [] { return 1; });
@@ -42,7 +42,7 @@ void consume_list_element(std::condition_variable &condition) {
   auto now = std::chrono::system_clock::now();
   if (list.next == nullptr) {
     condition.wait_until(lk, now + dur);
-    // CHECK-MESSAGES: :[[@LINE-1]]:15: warning: 'wait_until' should be placed inside a while statement or used with a condition parameter [misc-spuriously-wake-up-functions]
+    // CHECK-MESSAGES: :[[@LINE-1]]:15: warning: 'wait_until' should be placed inside a while statement or used with a condition parameter [bugprone-spuriously-wake-up-functions]
   }
   if (list.next == nullptr) {
     condition.wait_until(lk, now + dur, [] { return 1; });

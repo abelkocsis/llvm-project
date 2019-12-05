@@ -11,11 +11,11 @@
 #include "../ClangTidyModuleRegistry.h"
 #include "../bugprone/UnhandledSelfAssignmentCheck.h"
 #include "../bugprone/BadSignalToKillThreadCheck.h"
+#include "../bugprone/SpuriouslyWakeUpFunctionsCheck.h"
 #include "../google/UnnamedNamespaceInHeaderCheck.h"
 #include "../misc/NewDeleteOverloadsCheck.h"
 #include "../misc/NonCopyableObjects.h"
 #include "../misc/StaticAssertCheck.h"
-#include "../misc/SpuriouslyWakeUpFunctionsCheck.h"
 #include "../misc/ThrowByValueCatchByReferenceCheck.h"
 #include "../performance/MoveConstructorInitCheck.h"
 #include "../readability/UppercaseLiteralSuffixCheck.h"
@@ -41,7 +41,7 @@ public:
   void addCheckFactories(ClangTidyCheckFactories &CheckFactories) override {
     // C++ checkers
     // CON
-    CheckFactories.registerCheck<misc::SpuriouslyWakeUpFunctionsCheck>(
+    CheckFactories.registerCheck<bugprone::SpuriouslyWakeUpFunctionsCheck>(
         "cert-con54-cpp");
     // DCL
     CheckFactories.registerCheck<PostfixOperatorCheck>(
@@ -76,7 +76,7 @@ public:
 
     // C checkers
     // CON
-    CheckFactories.registerCheck<misc::SpuriouslyWakeUpFunctionsCheck>(
+    CheckFactories.registerCheck<bugprone::SpuriouslyWakeUpFunctionsCheck>(
         "cert-con36-c");
     // DCL
     CheckFactories.registerCheck<misc::StaticAssertCheck>("cert-dcl03-c");

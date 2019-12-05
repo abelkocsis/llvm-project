@@ -1,6 +1,6 @@
-.. title:: clang-tidy - misc-spuriously-wake-up-functions
+.. title:: clang-tidy - bugprone-spuriously-wake-up-functions
 
-misc-spuriously-wake-up-functions
+bugprone-spuriously-wake-up-functions
 =================================
 
 Finds ``cnd_wait`` or ``wait`` function calls in an ``IfStmt`` and tries to 

@@ -94,21 +94,28 @@ Improvements to clang-tidy
   Without the null terminator it can result in undefined behaviour when the
   string is read.
 
-- New alias :doc:`cert-con36-c
-  <clang-tidy/checks/cert-con36-c>` to
-  :doc:`misc-spuriously-wake-up-functions
-  <clang-tidy/checks/misc-spuriously-wake-up-functions>` was added.
+- New :doc:`bugprone-spuriously-wake-up-functions
+  <clang-tidy/checks/bugprone-spuriously-wake-up-functions>` check.
 
-- New alias :doc:`cert-con54-cpp
-  <clang-tidy/checks/cert-con54-cpp>` to
-  :doc:`misc-spuriously-wake-up-functions
-  <clang-tidy/checks/misc-spuriously-wake-up-functions>` was added.
+  Finds ``cnd_wait`` or ``wait`` function calls when the function is not
+  invoked from a loop that checks whether a condition predicate holds or the
+  function has a condition parameter.
 
 - New :doc:`cert-mem57-cpp
   <clang-tidy/checks/cert-mem57-cpp>` check.
 
   Checks if an object of type with extended alignment is allocated by using
   the default ``operator new``.
+
+- New alias :doc:`cert-con36-c
+  <clang-tidy/checks/cert-con36-c>` to
+  :doc:`bugprone-spuriously-wake-up-functions
+  <clang-tidy/checks/bugprone-spuriously-wake-up-functions>` was added.
+
+- New alias :doc:`cert-con54-cpp
+  <clang-tidy/checks/cert-con54-cpp>` to
+  :doc:`bugprone-spuriously-wake-up-functions
+  <clang-tidy/checks/bugprone-spuriously-wake-up-functions>` was added.
 
 - New alias :doc:`cert-pos44-c
   <clang-tidy/checks/cert-pos44-c>` to
@@ -188,13 +195,6 @@ Improvements to clang-tidy
 
   Finds non-static member functions that can be made ``const``
   because the functions don't use ``this`` in a non-const way.
-
-- New :doc:`misc-spuriously-wake-up-functions
-  <clang-tidy/checks/misc-spuriously-wake-up-functions>` check.
-
-  Finds ``cnd_wait`` or ``wait`` function calls when the function is not
-  invoked from a loop that checks whether a condition predicate holds or the
-  function has a condition parameter.
 
 - Improved :doc:`modernize-use-override
   <clang-tidy/checks/modernize-use-override>` check.
