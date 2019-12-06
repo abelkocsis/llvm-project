@@ -1,8 +1,11 @@
-// RUN: %check_clang_tidy %s bugprone-spuriously-wake-up-functions %t -- -- -I %S/../../../libcxx/include/
+// RUN: %check_clang_tidy %s bugprone-spuriously-wake-up-functions %t -- -- -I %S/Inputs/bugprone-spuriously-wake-up-functions/
 
-#include "chrono"
-#include "condition_variable"
-#include "mutex"
+#include "cstdint.h"
+#include "ratio.h"
+#include "chrono.h"
+#include "mutex.h"
+#include "condition_variable.h"
+
 
 struct Node1 {
   void *Node1;
@@ -41,10 +44,11 @@ void consume_list_element(std::condition_variable &condition) {
   }
   auto now = std::chrono::system_clock::now();
   if (list.next == nullptr) {
-    condition.wait_until(lk, now + dur);
+    condition.wait_until(lk, now);
     // CHECK-MESSAGES: :[[@LINE-1]]:15: warning: 'wait_until' should be placed inside a while statement or used with a condition parameter [bugprone-spuriously-wake-up-functions]
   }
   if (list.next == nullptr) {
-    condition.wait_until(lk, now + dur, [] { return 1; });
+    condition.wait_until(lk, now, [] { return 1; });
   }
+  
 }
