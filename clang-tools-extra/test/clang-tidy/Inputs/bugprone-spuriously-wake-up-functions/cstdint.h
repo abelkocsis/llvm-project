@@ -1,3 +1,3 @@
 namespace std {
-  using intmax_t = int ;
+using intmax_t = int;
 }

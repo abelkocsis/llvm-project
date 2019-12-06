@@ -1,11 +1,5 @@
 // RUN: %check_clang_tidy %s bugprone-spuriously-wake-up-functions %t -- -- -I %S/Inputs/bugprone-spuriously-wake-up-functions/
-
-#include "cstdint.h"
-#include "ratio.h"
-#include "chrono.h"
-#include "mutex.h"
 #include "condition_variable.h"
-
 
 struct Node1 {
   void *Node1;
@@ -50,5 +44,4 @@ void consume_list_element(std::condition_variable &condition) {
   if (list.next == nullptr) {
     condition.wait_until(lk, now, [] { return 1; });
   }
-  
 }
