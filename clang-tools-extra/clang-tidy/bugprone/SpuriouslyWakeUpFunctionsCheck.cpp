@@ -58,16 +58,31 @@ void SpuriouslyWakeUpFunctionsCheck::registerMatchers(MatchFinder *Finder) {
         this);
   } else {
     // Check for `CON36-C`
-    auto hasWaitDescendantC =
-        hasDescendant(callExpr(callee(functionDecl(allOf(hasName("cnd_wait"),
-                                                         parameterCountIs(2)))))
-                          .bind("wait"));
+    auto hasWaitDescendantC = hasDescendant(
+        callExpr(callee(functionDecl(hasName("cnd_wait")))).bind("wait"));
     Finder->addMatcher(
-        ifStmt(allOf(hasWaitDescendantC,
-                     unless(anyOf(hasDescendant(ifStmt(hasWaitDescendantC)),
-                                  hasDescendant(whileStmt(hasWaitDescendantC)),
-                                  hasDescendant(forStmt(hasWaitDescendantC)),
-                                  hasDescendant(doStmt(hasWaitDescendantC)))))),
+        ifStmt(
+            anyOf(
+                hasDescendant(compoundStmt(
+            allOf(hasWaitDescendantC,
+                  unless(anyOf(hasDescendant(ifStmt(hasDescendant(
+                                   compoundStmt(hasWaitDescendantC)))),
+                               hasDescendant(whileStmt(hasWaitDescendantC)),
+                               hasDescendant(forStmt(hasWaitDescendantC)),
+                               hasDescendant(doStmt(hasWaitDescendantC))))))),
+                allOf(
+            hasWaitDescendantC,
+            unless(anyOf(hasDescendant(ifStmt(hasDescendant(
+                                   compoundStmt(hasWaitDescendantC)))),
+                               hasDescendant(whileStmt(hasWaitDescendantC)),
+                               hasDescendant(forStmt(hasWaitDescendantC)),
+                               hasDescendant(doStmt(hasWaitDescendantC))))
+
+        )
+
+            
+            
+        )),
         this);
   }
 }
