@@ -9,6 +9,7 @@
 #include "SpuriouslyWakeUpFunctionsCheck.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
+#include <iostream> //atm!
 
 using namespace clang::ast_matchers;
 
@@ -19,6 +20,7 @@ namespace bugprone {
 void SpuriouslyWakeUpFunctionsCheck::registerMatchers(MatchFinder *Finder) {
 
   if (getLangOpts().CPlusPlus) {
+      std::cout << "cpp ág" << std::endl;
     // Check for `CON54-CPP`
     auto hasUniqueLock = hasDescendant(declRefExpr(hasDeclaration(
         varDecl(hasType(asString("std::unique_lock<std::mutex>"))))));
@@ -57,20 +59,21 @@ void SpuriouslyWakeUpFunctionsCheck::registerMatchers(MatchFinder *Finder) {
                                hasDescendant(doStmt(hasWaitDescendantCPP)))))),
         this);
   } else {
+      std::cout << "C ág " << std::endl;
     // Check for `CON36-C`
     auto hasWaitDescendantC = hasDescendant(
         callExpr(callee(functionDecl(hasName("cnd_wait")))).bind("wait"));
     Finder->addMatcher(
         ifStmt(
-            anyOf(
+ //           anyOf(
                 hasDescendant(compoundStmt(
             allOf(hasWaitDescendantC,
                   unless(anyOf(hasDescendant(ifStmt(hasDescendant(
                                    compoundStmt(hasWaitDescendantC)))),
                                hasDescendant(whileStmt(hasWaitDescendantC)),
                                hasDescendant(forStmt(hasWaitDescendantC)),
-                               hasDescendant(doStmt(hasWaitDescendantC))))))),
-                allOf(
+                               hasDescendant(doStmt(hasWaitDescendantC)))))))//,
+ /*               allOf(
             hasWaitDescendantC,
             unless(anyOf(hasDescendant(ifStmt(hasDescendant(
                                    compoundStmt(hasWaitDescendantC)))),
@@ -79,10 +82,11 @@ void SpuriouslyWakeUpFunctionsCheck::registerMatchers(MatchFinder *Finder) {
                                hasDescendant(doStmt(hasWaitDescendantC))))
 
         )
-
+  */      
             
             
-        )),
+ //       )
+        ),
         this);
   }
 }
