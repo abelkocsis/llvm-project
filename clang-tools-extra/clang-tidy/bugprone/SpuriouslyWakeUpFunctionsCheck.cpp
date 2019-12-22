@@ -19,9 +19,6 @@ namespace bugprone {
 
 void SpuriouslyWakeUpFunctionsCheck::registerMatchers(MatchFinder *Finder) {
 
-  if (getLangOpts().CPlusPlus) {
-      std::cout << "cpp ág" << std::endl;
-    // Check for `CON54-CPP`
     auto hasUniqueLock = hasDescendant(declRefExpr(hasDeclaration(
         varDecl(hasType(asString("std::unique_lock<std::mutex>"))))));
 
@@ -50,45 +47,26 @@ void SpuriouslyWakeUpFunctionsCheck::registerMatchers(MatchFinder *Finder) {
                     ))
             .bind("wait"));
 
-    Finder->addMatcher(
-        ifStmt(
-            allOf(hasWaitDescendantCPP,
-                  unless(anyOf(hasDescendant(ifStmt(hasWaitDescendantCPP)),
-                               hasDescendant(whileStmt(hasWaitDescendantCPP)),
-                               hasDescendant(forStmt(hasWaitDescendantCPP)),
-                               hasDescendant(doStmt(hasWaitDescendantCPP)))))),
-        this);
-  } else {
-      std::cout << "C ág " << std::endl;
-    // Check for `CON36-C`
     auto hasWaitDescendantC = hasDescendant(
         callExpr(callee(functionDecl(hasName("cnd_wait")))).bind("wait"));
     Finder->addMatcher(
         ifStmt(
- //           anyOf(
-                hasDescendant(compoundStmt(
+            anyOf(
+            // Check for `CON54-CPP`
+            allOf(hasWaitDescendantCPP,
+                  unless(anyOf(hasDescendant(ifStmt(hasWaitDescendantCPP)),
+                               hasDescendant(whileStmt(hasWaitDescendantCPP)),
+                               hasDescendant(forStmt(hasWaitDescendantCPP)),
+                               hasDescendant(doStmt(hasWaitDescendantCPP))))),
+            // Check for `CON36-C`
+            hasDescendant(compoundStmt(
             allOf(hasWaitDescendantC,
                   unless(anyOf(hasDescendant(ifStmt(hasDescendant(
                                    compoundStmt(hasWaitDescendantC)))),
                                hasDescendant(whileStmt(hasWaitDescendantC)),
                                hasDescendant(forStmt(hasWaitDescendantC)),
-                               hasDescendant(doStmt(hasWaitDescendantC)))))))//,
- /*               allOf(
-            hasWaitDescendantC,
-            unless(anyOf(hasDescendant(ifStmt(hasDescendant(
-                                   compoundStmt(hasWaitDescendantC)))),
-                               hasDescendant(whileStmt(hasWaitDescendantC)),
-                               hasDescendant(forStmt(hasWaitDescendantC)),
-                               hasDescendant(doStmt(hasWaitDescendantC))))
-
-        )
-  */      
-            
-            
- //       )
-        ),
+                               hasDescendant(doStmt(hasWaitDescendantC)))))))     )                 ),
         this);
-  }
 }
 
 void SpuriouslyWakeUpFunctionsCheck::check(

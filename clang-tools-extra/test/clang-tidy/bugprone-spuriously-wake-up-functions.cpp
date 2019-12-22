@@ -71,7 +71,7 @@ void consume_list_element(void) {
   }
   if (list_c.next == NULL) {
     cnd_wait(&condition_c, &lock);
-    // CHECK-MESSAGES: :[[@LINE-1]]:14: warning: 'cnd_wait' should be placed inside a while statement or used with a condition parameter [bugprone-spuriously-wake-up-functions]
+    // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: 'cnd_wait' should be placed inside a while statement or used with a condition parameter [bugprone-spuriously-wake-up-functions]
   }
   while (list.next == NULL) {
     cnd_wait(&condition_c, &lock);
