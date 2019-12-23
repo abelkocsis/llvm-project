@@ -107,16 +107,6 @@ Improvements to clang-tidy
   Checks if an object of type with extended alignment is allocated by using
   the default ``operator new``.
 
-- New alias :doc:`cert-con36-c
-  <clang-tidy/checks/cert-con36-c>` to
-  :doc:`bugprone-spuriously-wake-up-functions
-  <clang-tidy/checks/bugprone-spuriously-wake-up-functions>` was added.
-
-- New alias :doc:`cert-con54-cpp
-  <clang-tidy/checks/cert-con54-cpp>` to
-  :doc:`bugprone-spuriously-wake-up-functions
-  <clang-tidy/checks/bugprone-spuriously-wake-up-functions>` was added.
-
 - New alias :doc:`cert-pos44-c
   <clang-tidy/checks/cert-pos44-c>` to
   :doc:`bugprone-bad-signal-to-kill-thread
@@ -232,6 +222,16 @@ Improvements to clang-tidy
   only simple free functions. The `PermissiveParameterList` option has also been
   added to address situations where the existing fix-it logic would sometimes generate
   code that no longer compiles.
+
+- New alias :doc:`cert-con36-c
+  <clang-tidy/checks/cert-con36-c>` to
+  :doc:`bugprone-spuriously-wake-up-functions
+  <clang-tidy/checks/bugprone-spuriously-wake-up-functions>` was added.
+
+- New alias :doc:`cert-con54-cpp
+  <clang-tidy/checks/cert-con54-cpp>` to
+  :doc:`bugprone-spuriously-wake-up-functions
+  <clang-tidy/checks/bugprone-spuriously-wake-up-functions>` was added.
 
 Improvements to include-fixer
 -----------------------------
