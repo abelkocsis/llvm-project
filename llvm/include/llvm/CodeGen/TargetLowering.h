@@ -951,6 +951,8 @@ public:
       default: llvm_unreachable("Unexpected FP pseudo-opcode");
 #define INSTRUCTION(NAME, NARG, ROUND_MODE, INTRINSIC, DAGN)                   \
       case ISD::STRICT_##DAGN: EqOpc = ISD::DAGN; break;
+#define CMP_INSTRUCTION(NAME, NARG, ROUND_MODE, INTRINSIC, DAGN)               \
+      case ISD::STRICT_##DAGN: EqOpc = ISD::SETCC; break;
 #include "llvm/IR/ConstrainedOps.def"
     }
 
@@ -1252,7 +1254,7 @@ public:
         Elm = PointerTy.getTypeForEVT(Ty->getContext());
       }
       return EVT::getVectorVT(Ty->getContext(), EVT::getEVT(Elm, false),
-                       VTy->getNumElements());
+                              VTy->getElementCount());
     }
 
     return getValueType(DL, Ty, AllowUnknown);
@@ -3303,9 +3305,7 @@ public:
 
     bool isBeforeLegalize() const { return Level == BeforeLegalizeTypes; }
     bool isBeforeLegalizeOps() const { return Level < AfterLegalizeVectorOps; }
-    bool isAfterLegalizeDAG() const {
-      return Level == AfterLegalizeDAG;
-    }
+    bool isAfterLegalizeDAG() const { return Level >= AfterLegalizeDAG; }
     CombineLevel getDAGCombineLevel() { return Level; }
     bool isCalledByLegalizer() const { return CalledByLegalizer; }
 
@@ -4123,14 +4123,18 @@ public:
   /// Expand float to UINT conversion
   /// \param N Node to expand
   /// \param Result output after conversion
+  /// \param Chain output chain after conversion
   /// \returns True, if the expansion was successful, false otherwise
-  bool expandFP_TO_UINT(SDNode *N, SDValue &Result, SDValue &Chain, SelectionDAG &DAG) const;
+  bool expandFP_TO_UINT(SDNode *N, SDValue &Result, SDValue &Chain,
+                        SelectionDAG &DAG) const;
 
   /// Expand UINT(i64) to double(f64) conversion
   /// \param N Node to expand
   /// \param Result output after conversion
+  /// \param Chain output chain after conversion
   /// \returns True, if the expansion was successful, false otherwise
-  bool expandUINT_TO_FP(SDNode *N, SDValue &Result, SelectionDAG &DAG) const;
+  bool expandUINT_TO_FP(SDNode *N, SDValue &Result, SDValue &Chain,
+                        SelectionDAG &DAG) const;
 
   /// Expand fminnum/fmaxnum into fminnum_ieee/fmaxnum_ieee with quieted inputs.
   SDValue expandFMINNUM_FMAXNUM(SDNode *N, SelectionDAG &DAG) const;

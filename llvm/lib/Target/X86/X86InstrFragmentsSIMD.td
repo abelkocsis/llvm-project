@@ -169,7 +169,7 @@ def X86vshiftimm : SDTypeProfile<1, 2, [SDTCisVec<0>, SDTCisSameAs<0,1>,
 
 def X86vshldq  : SDNode<"X86ISD::VSHLDQ",    X86vshiftimm>;
 def X86vshrdq  : SDNode<"X86ISD::VSRLDQ",    X86vshiftimm>;
-def X86cmpp    : SDNode<"X86ISD::CMPP",      SDTX86VFCMP>;
+def X86cmpp    : SDNode<"X86ISD::CMPP",      SDTX86VFCMP, [SDNPHasChain]>;
 def X86pcmpeq  : SDNode<"X86ISD::PCMPEQ", SDTIntBinOp, [SDNPCommutative]>;
 def X86pcmpgt  : SDNode<"X86ISD::PCMPGT", SDTIntBinOp>;
 
@@ -181,7 +181,7 @@ def X86CmpMaskCCScalar :
       SDTypeProfile<1, 3, [SDTCisInt<0>, SDTCisFP<1>, SDTCisSameAs<1, 2>,
                            SDTCisVT<3, i8>]>;
 
-def X86cmpm     : SDNode<"X86ISD::CMPM",     X86CmpMaskCC>;
+def X86cmpm     : SDNode<"X86ISD::CMPM",     X86CmpMaskCC, [SDNPHasChain]>;
 def X86cmpmSAE  : SDNode<"X86ISD::CMPM_SAE", X86CmpMaskCC>;
 def X86cmpms    : SDNode<"X86ISD::FSETCCM",   X86CmpMaskCCScalar>;
 def X86cmpmsSAE : SDNode<"X86ISD::FSETCCM_SAE",   X86CmpMaskCCScalar>;
@@ -493,7 +493,11 @@ def X86fgetexpSAE   : SDNode<"X86ISD::FGETEXP_SAE", SDTFPUnaryOp>;
 def X86fgetexps     : SDNode<"X86ISD::FGETEXPS", SDTFPBinOp>;
 def X86fgetexpSAEs  : SDNode<"X86ISD::FGETEXPS_SAE", SDTFPBinOp>;
 
-def X86Fmadd     : SDNode<"ISD::FMA",          SDTFPTernaryOp, [SDNPCommutative]>;
+def X86Fmadd        : SDNode<"ISD::FMA",          SDTFPTernaryOp, [SDNPCommutative]>;
+def X86strict_Fmadd : SDNode<"ISD::STRICT_FMA",   SDTFPTernaryOp, [SDNPCommutative, SDNPHasChain]>;
+def X86any_Fmadd    : PatFrags<(ops node:$src1, node:$src2, node:$src3),
+                               [(X86strict_Fmadd node:$src1, node:$src2, node:$src3),
+                                (X86Fmadd node:$src1, node:$src2, node:$src3)]>;
 def X86Fnmadd    : SDNode<"X86ISD::FNMADD",    SDTFPTernaryOp, [SDNPCommutative]>;
 def X86Fmsub     : SDNode<"X86ISD::FMSUB",     SDTFPTernaryOp, [SDNPCommutative]>;
 def X86Fnmsub    : SDNode<"X86ISD::FNMSUB",    SDTFPTernaryOp, [SDNPCommutative]>;
@@ -619,8 +623,8 @@ def X86cvtp2UIntRnd     : SDNode<"X86ISD::CVTP2UI_RND",  SDTFloatToIntRnd>;
 // Vector without rounding mode
 
 // cvtt fp-to-int staff
-def X86cvttp2si      : SDNode<"X86ISD::CVTTP2SI",  SDTFloatToInt>;
-def X86cvttp2ui      : SDNode<"X86ISD::CVTTP2UI",  SDTFloatToInt>;
+def X86cvttp2si      : SDNode<"X86ISD::CVTTP2SI",  SDTFloatToInt, [SDNPHasChain]>;
+def X86cvttp2ui      : SDNode<"X86ISD::CVTTP2UI",  SDTFloatToInt, [SDNPHasChain]>;
 
 def X86VSintToFP      : SDNode<"X86ISD::CVTSI2P",  SDTVintToFP>;
 def X86VUintToFP      : SDNode<"X86ISD::CVTUI2P",  SDTVintToFP>;
