@@ -9,7 +9,6 @@
 #include "SpuriouslyWakeUpFunctionsCheck.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
-#include <iostream> //atm!
 
 using namespace clang::ast_matchers;
 
@@ -19,13 +18,12 @@ namespace bugprone {
 
 void SpuriouslyWakeUpFunctionsCheck::registerMatchers(MatchFinder *Finder) {
 
-    auto hasUniqueLock = hasDescendant(declRefExpr(hasDeclaration(
-        varDecl(hasType(asString("std::unique_lock<std::mutex>"))))));
+  auto hasUniqueLock = hasDescendant(declRefExpr(hasDeclaration(
+      varDecl(hasType(asString("std::unique_lock<std::mutex>"))))));
 
-    auto hasWaitDescendantCPP = hasDescendant(
-        cxxMemberCallExpr(
-            anyOf(
-                allOf(hasDescendant(memberExpr(hasDeclaration(functionDecl(
+  auto hasWaitDescendantCPP = hasDescendant(
+      cxxMemberCallExpr(
+          anyOf(allOf(hasDescendant(memberExpr(hasDeclaration(functionDecl(
                           allOf(hasName("std::condition_variable::wait"),
                                 parameterCountIs(1)))))),
                       onImplicitObjectArgument(declRefExpr(to(varDecl(
@@ -45,37 +43,40 @@ void SpuriouslyWakeUpFunctionsCheck::registerMatchers(MatchFinder *Finder) {
                       hasUniqueLock)
 
                     ))
-            .bind("wait"));
+          .bind("wait"));
 
-    auto hasWaitDescendantC = hasDescendant(
-        callExpr(callee(functionDecl(hasName("cnd_wait")))).bind("wait"));
-    Finder->addMatcher(
-        ifStmt(
-            anyOf(
-            // Check for `CON54-CPP`
-            allOf(hasWaitDescendantCPP,
-                  unless(anyOf(hasDescendant(ifStmt(hasWaitDescendantCPP)),
-                               hasDescendant(whileStmt(hasWaitDescendantCPP)),
-                               hasDescendant(forStmt(hasWaitDescendantCPP)),
-                               hasDescendant(doStmt(hasWaitDescendantCPP))))),
-            // Check for `CON36-C`
-            hasDescendant(compoundStmt(
-            allOf(hasWaitDescendantC,
-                  unless(anyOf(hasDescendant(ifStmt(hasDescendant(
-                                   compoundStmt(hasWaitDescendantC)))),
-                               hasDescendant(whileStmt(hasWaitDescendantC)),
-                               hasDescendant(forStmt(hasWaitDescendantC)),
-                               hasDescendant(doStmt(hasWaitDescendantC)))))))     )                 ),
-        this);
+  auto hasWaitDescendantC = hasDescendant(
+      callExpr(callee(functionDecl(hasName("cnd_wait")))).bind("wait"));
+  Finder->addMatcher(
+      ifStmt(anyOf(
+          // Check for `CON54-CPP`
+          allOf(hasWaitDescendantCPP,
+                unless(anyOf(hasDescendant(ifStmt(hasWaitDescendantCPP)),
+                             hasDescendant(whileStmt(hasWaitDescendantCPP)),
+                             hasDescendant(forStmt(hasWaitDescendantCPP)),
+                             hasDescendant(doStmt(hasWaitDescendantCPP))))),
+          // Check for `CON36-C`
+          hasDescendant(compoundStmt(allOf(
+              hasWaitDescendantC,
+              unless(anyOf(hasDescendant(ifStmt(hasDescendant(
+                               compoundStmt(hasWaitDescendantC)))),
+                           hasDescendant(whileStmt(hasWaitDescendantC)),
+                           hasDescendant(forStmt(hasWaitDescendantC)),
+                           hasDescendant(doStmt(hasWaitDescendantC))))))))),
+      this);
 }
 
 void SpuriouslyWakeUpFunctionsCheck::check(
     const MatchFinder::MatchResult &Result) {
   const auto *MatchedWait = Result.Nodes.getNodeAs<CallExpr>("wait");
-  diag(
-      MatchedWait->getExprLoc(),
-      "'%0' should be placed inside a while statement or used with a condition "
-      "parameter")
+  SmallString<128> Buffer;
+  llvm::raw_svector_ostream Str(Buffer);
+  Str << "'%0' should be placed inside a while statement";
+  if (MatchedWait->getDirectCallee()->getName() != "cnd_wait")
+    Str << " or used with a condition parameter";
+  diag(MatchedWait->getExprLoc(), Str.str().str()
+
+           )
       << MatchedWait->getDirectCallee()->getName();
 }
 } // namespace bugprone
