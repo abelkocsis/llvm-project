@@ -97,9 +97,9 @@ Improvements to clang-tidy
 - New :doc:`bugprone-spuriously-wake-up-functions
   <clang-tidy/checks/bugprone-spuriously-wake-up-functions>` check.
 
-  Finds ``cnd_wait`` or ``wait`` function calls when the function is not
-  invoked from a loop that checks whether a condition predicate holds or the
-  function has a condition parameter.
+  Finds ``cnd_wait``, ``wait``, ``wait_for``, or ``wait_until`` function calls
+  when the function is not invoked from a loop that checks whether a condition
+  predicate holds or the function has a condition parameter.
 
 - New :doc:`cert-mem57-cpp
   <clang-tidy/checks/cert-mem57-cpp>` check.

@@ -15,8 +15,9 @@ namespace clang {
 namespace tidy {
 namespace bugprone {
 
-/// Finds ``cnd_wait`` or `wait` function calls in an ``IfStmt`` and tries to
-/// replace it with ``WhileStmt``.
+/// Finds ``cnd_wait``, ``wait``, ``wait_for``, or ``wait_until`` function 
+/// calls when the function is not invoked from a loop that checks whether a 
+/// condition predicate holds or the function has a condition parameter.
 ///
 /// For the user-facing documentation see:
 /// http://clang.llvm.org/extra/clang-tidy/checks/bugprone-spuriously-wake-up-functions.html
