@@ -46,7 +46,9 @@ void SpuriouslyWakeUpFunctionsCheck::registerMatchers(MatchFinder *Finder) {
           .bind("wait"));
 
   auto hasWaitDescendantC = hasDescendant(
-      callExpr(callee(functionDecl(hasName("cnd_wait")))).bind("wait"));
+      callExpr(callee(functionDecl(
+                   anyOf(hasName("cnd_wait"), hasName("cnd_timedwait")))))
+          .bind("wait"));
   Finder->addMatcher(
       ifStmt(anyOf(
           // Check for `CON54-CPP`
@@ -72,12 +74,10 @@ void SpuriouslyWakeUpFunctionsCheck::check(
   SmallString<128> Buffer;
   llvm::raw_svector_ostream Str(Buffer);
   Str << "'%0' should be placed inside a while statement";
-  if (MatchedWait->getDirectCallee()->getName() != "cnd_wait")
+  auto waitName = MatchedWait->getDirectCallee()->getName();
+  if (waitName != "cnd_wait" && waitName != "cnd_timedwait")
     Str << " or used with a condition parameter";
-  diag(MatchedWait->getExprLoc(), Str.str().str()
-
-           )
-      << MatchedWait->getDirectCallee()->getName();
+  diag(MatchedWait->getExprLoc(), Str.str().str()) << waitName;
 }
 } // namespace bugprone
 } // namespace tidy
