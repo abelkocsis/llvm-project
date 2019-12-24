@@ -1,7 +1,7 @@
 .. title:: clang-tidy - bugprone-spuriously-wake-up-functions
 
 bugprone-spuriously-wake-up-functions
-=================================
+=====================================
 
 Finds ``cnd_wait``, ``wait``, ``wait_for``, or ``wait_until`` function calls
 when the function is not invoked from a loop that checks whether a condition
