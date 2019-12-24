@@ -92,8 +92,6 @@ Clang-Tidy Checks
    `bugprone-unused-return-value <bugprone-unused-return-value.html>`_, , "medium"
    `bugprone-use-after-move <bugprone-use-after-move.html>`_, , "high"
    `bugprone-virtual-near-miss <bugprone-virtual-near-miss.html>`_, "Yes", "medium"
-   `cert-con36-c <cert-con36-c.html>`_, , ""
-   `cert-con54-cpp <cert-con54-cpp.html>`_, , ""
    `cert-dcl21-cpp <cert-dcl21-cpp.html>`_, , "low"
    `cert-dcl50-cpp <cert-dcl50-cpp.html>`_, , "low"
    `cert-dcl58-cpp <cert-dcl58-cpp.html>`_, , "high"
@@ -295,6 +293,8 @@ Clang-Tidy Checks
    :header: "Name", "Redirect", "Offers fixes", "Severity"
    :widths: 50, 50, 10, 10
 
+   `cert-con36-c <cert-con36-c.html>`_, `bugprone-spuriously-wake-up-functions <bugprone-spuriously-wake-up-functions.html>`_, , ""
+   `cert-con54-cpp <cert-con54-cpp.html>`_, `bugprone-spuriously-wake-up-functions <bugprone-spuriously-wake-up-functions.html>`_, , ""
    `cert-dcl03-c <cert-dcl03-c.html>`_, `misc-static-assert <misc-static-assert.html>`_, "Yes", "medium"
    `cert-dcl16-c <cert-dcl16-c.html>`_, `readability-uppercase-literal-suffix <readability-uppercase-literal-suffix.html>`_, "Yes", "style"
    `cert-dcl54-cpp <cert-dcl54-cpp.html>`_, `misc-new-delete-overloads <misc-new-delete-overloads.html>`_, , "medium"
