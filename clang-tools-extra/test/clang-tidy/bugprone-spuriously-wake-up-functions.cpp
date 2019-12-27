@@ -16,10 +16,18 @@ void consume_list_element(std::condition_variable &condition) {
 
   if (list.next == nullptr) {
     condition.wait(lk);
-    // CHECK-MESSAGES: :[[@LINE-1]]:15: warning: 'wait' should be placed inside a while statement or used with a condition parameter [bugprone-spuriously-wake-up-functions]
+    // CHECK-MESSAGES: :[[@LINE-1]]:15: warning: 'wait' should be placed inside a while statement or used with a conditional parameter [bugprone-spuriously-wake-up-functions]
   }
 
   while (list.next == nullptr) {
+    condition.wait(lk);
+  }
+
+  do {
+    condition.wait(lk);
+  } while (list.next == nullptr);
+
+  for (;; list.next == nullptr) {
     condition.wait(lk);
   }
 
@@ -28,22 +36,53 @@ void consume_list_element(std::condition_variable &condition) {
       condition.wait(lk);
     }
   }
+
+  if (list.next == nullptr) {
+    do {
+      condition.wait(lk);
+    } while (list.next == nullptr);
+  }
+
+  if (list.next == nullptr) {
+    for (;; list.next == nullptr) {
+      condition.wait(lk);
+    }
+  }
   using durtype = std::chrono::duration<int, std::milli>;
   durtype dur = std::chrono::duration<int, std::milli>();
   if (list.next == nullptr) {
     condition.wait_for(lk, dur);
-    // CHECK-MESSAGES: :[[@LINE-1]]:15: warning: 'wait_for' should be placed inside a while statement or used with a condition parameter [bugprone-spuriously-wake-up-functions]
+    // CHECK-MESSAGES: :[[@LINE-1]]:15: warning: 'wait_for' should be placed inside a while statement or used with a conditional parameter [bugprone-spuriously-wake-up-functions]
   }
   if (list.next == nullptr) {
     condition.wait_for(lk, dur, [] { return 1; });
   }
+  while (list.next == nullptr) {
+    condition.wait_for(lk, dur);
+  }
+  do {
+    condition.wait_for(lk, dur);
+  } while (list.next == nullptr);
+  for (;; list.next == nullptr) {
+    condition.wait_for(lk, dur);
+  }
+
   auto now = std::chrono::system_clock::now();
   if (list.next == nullptr) {
     condition.wait_until(lk, now);
-    // CHECK-MESSAGES: :[[@LINE-1]]:15: warning: 'wait_until' should be placed inside a while statement or used with a condition parameter [bugprone-spuriously-wake-up-functions]
+    // CHECK-MESSAGES: :[[@LINE-1]]:15: warning: 'wait_until' should be placed inside a while statement or used with a conditional parameter [bugprone-spuriously-wake-up-functions]
   }
   if (list.next == nullptr) {
     condition.wait_until(lk, now, [] { return 1; });
+  }
+  while (list.next == nullptr) {
+    condition.wait_until(lk, now);
+  }
+  do {
+    condition.wait_until(lk, now);
+  } while (list.next == nullptr);
+  for (;; list.next == nullptr) {
+    condition.wait_until(lk, now);
   }
 }
 
@@ -80,6 +119,20 @@ void consume_list_element(void) {
   while (list.next == NULL) {
     cnd_wait(&condition_c, &lock);
   }
+  do {
+    if (0 != cnd_wait(&condition_c, &lock)) {
+    }
+  } while (list.next == NULL);
+  do {
+    cnd_wait(&condition_c, &lock);
+  } while (list.next == NULL);
+  for (;; list.next == NULL) {
+    if (0 != cnd_wait(&condition_c, &lock)) {
+    }
+  }
+  for (;; list.next == NULL) {
+    cnd_wait(&condition_c, &lock);
+  }
   if (list_c.next == NULL) {
     if (0 != cnd_timedwait(&condition_c, &lock, &ts)) {
       // CHECK-MESSAGES: :[[@LINE-1]]:14: warning: 'cnd_timedwait' should be placed inside a while statement [bugprone-spuriously-wake-up-functions]
@@ -94,6 +147,20 @@ void consume_list_element(void) {
     // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: 'cnd_timedwait' should be placed inside a while statement [bugprone-spuriously-wake-up-functions]
   }
   while (list.next == NULL) {
+    cnd_timedwait(&condition_c, &lock, &ts);
+  }
+  do {
+    if (0 != cnd_timedwait(&condition_c, &lock, &ts)) {
+    }
+  } while (list.next == NULL);
+  do {
+    cnd_timedwait(&condition_c, &lock, &ts);
+  } while (list.next == NULL);
+  for (;; list.next == NULL) {
+    if (0 != cnd_timedwait(&condition_c, &lock, &ts)) {
+    }
+  }
+  for (;; list.next == NULL) {
     cnd_timedwait(&condition_c, &lock, &ts);
   }
 }

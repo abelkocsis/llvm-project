@@ -18,31 +18,39 @@ namespace bugprone {
 
 void SpuriouslyWakeUpFunctionsCheck::registerMatchers(MatchFinder *Finder) {
 
-  auto hasUniqueLock = hasDescendant(declRefExpr(hasDeclaration(
-      varDecl(hasType(asString("std::unique_lock<std::mutex>"))))));
+  auto hasUniqueLock = hasDescendant(declRefExpr(
+      hasDeclaration(varDecl(hasType(recordDecl(classTemplateSpecializationDecl(
+          hasName("::std::unique_lock"),
+          hasTemplateArgument(
+              0, templateArgument(refersToType(qualType(hasDeclaration(
+                     cxxRecordDecl(hasName("::std::mutex"))))))))))))));
 
   auto hasWaitDescendantCPP = hasDescendant(
       cxxMemberCallExpr(
-          anyOf(allOf(hasDescendant(memberExpr(hasDeclaration(functionDecl(
-                          allOf(hasName("std::condition_variable::wait"),
-                                parameterCountIs(1)))))),
-                      onImplicitObjectArgument(declRefExpr(to(varDecl(
-                          hasType(asString("std::condition_variable &")))))),
-                      hasUniqueLock),
-                allOf(hasDescendant(memberExpr(hasDeclaration(functionDecl(
-                          allOf(hasName("std::condition_variable::wait_for"),
-                                parameterCountIs(2)))))),
-                      onImplicitObjectArgument(declRefExpr(to(varDecl(
-                          hasType(asString("std::condition_variable &")))))),
-                      hasUniqueLock),
-                allOf(hasDescendant(memberExpr(hasDeclaration(functionDecl(
-                          allOf(hasName("std::condition_variable::wait_until"),
-                                parameterCountIs(2)))))),
-                      onImplicitObjectArgument(declRefExpr(to(varDecl(
-                          hasType(asString("std::condition_variable &")))))),
-                      hasUniqueLock)
+          anyOf(
+              allOf(hasDescendant(memberExpr(hasDeclaration(functionDecl(
+                        allOf(hasName("::std::condition_variable::wait"),
+                              parameterCountIs(1)))))),
+                    onImplicitObjectArgument(
+                        declRefExpr(to(varDecl(hasType(references(recordDecl(
+                            hasName("::std::condition_variable")))))))),
+                    hasUniqueLock),
+              allOf(hasDescendant(memberExpr(hasDeclaration(functionDecl(
+                        allOf(hasName("::std::condition_variable::wait_for"),
+                              parameterCountIs(2)))))),
+                    onImplicitObjectArgument(
+                        declRefExpr(to(varDecl(hasType(references(recordDecl(
+                            hasName("::std::condition_variable")))))))),
+                    hasUniqueLock),
+              allOf(hasDescendant(memberExpr(hasDeclaration(functionDecl(
+                        allOf(hasName("::std::condition_variable::wait_until"),
+                              parameterCountIs(2)))))),
+                    onImplicitObjectArgument(
+                        declRefExpr(to(varDecl(hasType(references(recordDecl(
+                            hasName("::std::condition_variable")))))))),
+                    hasUniqueLock)
 
-                    ))
+                  ))
           .bind("wait"));
 
   auto hasWaitDescendantC = hasDescendant(
@@ -71,13 +79,11 @@ void SpuriouslyWakeUpFunctionsCheck::registerMatchers(MatchFinder *Finder) {
 void SpuriouslyWakeUpFunctionsCheck::check(
     const MatchFinder::MatchResult &Result) {
   const auto *MatchedWait = Result.Nodes.getNodeAs<CallExpr>("wait");
-  SmallString<128> Buffer;
-  llvm::raw_svector_ostream Str(Buffer);
-  Str << "'%0' should be placed inside a while statement";
-  auto waitName = MatchedWait->getDirectCallee()->getName();
-  if (waitName != "cnd_wait" && waitName != "cnd_timedwait")
-    Str << " or used with a condition parameter";
-  diag(MatchedWait->getExprLoc(), Str.str().str()) << waitName;
+  StringRef WaitName = MatchedWait->getDirectCallee()->getName();
+  diag(MatchedWait->getExprLoc(),
+       "'%0' should be placed inside a while statement %select{|or used with a "
+       "conditional parameter}1")
+      << WaitName << (WaitName != "cnd_wait" && WaitName != "cnd_timedwait");
 }
 } // namespace bugprone
 } // namespace tidy
