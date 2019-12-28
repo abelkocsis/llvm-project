@@ -1,6 +1,110 @@
-// RUN: %check_clang_tidy %s bugprone-spuriously-wake-up-functions %t -- -- -I %S/Inputs/bugprone-spuriously-wake-up-functions/
-#include "condition_variable.h"
+// RUN: %check_clang_tidy %s bugprone-spuriously-wake-up-functions %t -- --
 #define NULL 0
+
+namespace std {
+using intmax_t = int;
+
+template <intmax_t N, intmax_t D = 1>
+class ratio {
+public:
+  static constexpr intmax_t num = 0;
+  static constexpr intmax_t den = 0;
+  typedef ratio<num, den> type;
+};
+typedef ratio<1, 1000> milli;
+namespace chrono {
+
+template <class Rep, class Period = ratio<1>>
+class duration {
+public:
+  using rep = Rep;
+  using period = Period;
+
+public:
+  constexpr duration() = default;
+  template <class Rep2>
+  constexpr explicit duration(const Rep2 &r);
+  template <class Rep2, class Period2>
+  constexpr duration(const duration<Rep2, Period2> &d);
+  ~duration() = default;
+  duration(const duration &) = default;
+};
+
+template <class Clock, class Duration = typename Clock::duration>
+class time_point {
+public:
+  using clock = Clock;
+  using duration = Duration;
+
+public:
+  constexpr time_point();
+  constexpr explicit time_point(const duration &d);
+  template <class Duration2>
+  constexpr time_point(const time_point<clock, Duration2> &t);
+};
+
+using milliseconds = duration<int, milli>;
+
+class system_clock {
+public:
+  typedef milliseconds duration;
+  typedef duration::rep rep;
+  typedef duration::period period;
+  typedef chrono::time_point<system_clock> time_point;
+
+  static time_point now() noexcept;
+};
+} // namespace chrono
+
+class mutex;
+template <class Mutex>
+class unique_lock {
+public:
+  typedef Mutex mutex_type;
+
+  unique_lock() noexcept;
+  explicit unique_lock(mutex_type &m);
+};
+
+class mutex {
+public:
+  constexpr mutex() noexcept;
+  ~mutex();
+  mutex(const mutex &) = delete;
+  mutex &operator=(const mutex &) = delete;
+};
+
+enum class cv_status {
+  no_timeout,
+  timeout
+};
+
+class condition_variable {
+public:
+  condition_variable();
+  ~condition_variable();
+  condition_variable(const condition_variable &) = delete;
+
+  void wait(unique_lock<mutex> &lock);
+  template <class Predicate>
+  void wait(unique_lock<mutex> &lock, Predicate pred);
+  template <class Clock, class Duration>
+  cv_status wait_until(unique_lock<mutex> &lock,
+                       const chrono::time_point<Clock, Duration> &abs_time){};
+  template <class Clock, class Duration, class Predicate>
+  bool wait_until(unique_lock<mutex> &lock,
+                  const chrono::time_point<Clock, Duration> &abs_time,
+                  Predicate pred){};
+  template <class Rep, class Period>
+  cv_status wait_for(unique_lock<mutex> &lock,
+                     const chrono::duration<Rep, Period> &rel_time){};
+  template <class Rep, class Period, class Predicate>
+  bool wait_for(unique_lock<mutex> &lock,
+                const chrono::duration<Rep, Period> &rel_time,
+                Predicate pred){};
+};
+
+} // namespace std
 
 struct Node1 {
   void *Node1;
