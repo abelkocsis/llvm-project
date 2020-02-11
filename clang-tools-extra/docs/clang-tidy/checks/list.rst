@@ -72,7 +72,7 @@ Clang-Tidy Checks
    `bugprone-posix-return <bugprone-posix-return.html>`_, "Yes", ""
    `bugprone-sizeof-container <bugprone-sizeof-container.html>`_, , "high"
    `bugprone-sizeof-expression <bugprone-sizeof-expression.html>`_, , "high"
-   `bugprone-spuriously-wake-up-functions <bugprone-spuriously-wake-up-functions.html>`_, , ""
+   `bugprone-spuriously-wake-up-functions <bugprone-spuriously-wake-up-functions.html>`_, Yes, "low"
    `bugprone-string-constructor <bugprone-string-constructor.html>`_, "Yes", "high"
    `bugprone-string-integer-assignment <bugprone-string-integer-assignment.html>`_, "Yes", "low"
    `bugprone-string-literal-with-embedded-nul <bugprone-string-literal-with-embedded-nul.html>`_, , "medium"
