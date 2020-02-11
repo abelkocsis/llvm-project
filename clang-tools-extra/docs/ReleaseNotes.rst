@@ -142,16 +142,6 @@ Renamed checks
 ^^^^^^^^^^^^^^
 
 
-- New alias :doc:`cert-con36-c
-  <clang-tidy/checks/cert-con36-c>` to
-  :doc:`bugprone-spuriously-wake-up-functions
-  <clang-tidy/checks/bugprone-spuriously-wake-up-functions>` was added.
-
-- New alias :doc:`cert-con54-cpp
-  <clang-tidy/checks/cert-con54-cpp>` to
-  :doc:`bugprone-spuriously-wake-up-functions
-  <clang-tidy/checks/bugprone-spuriously-wake-up-functions>` was added.
-
 Improvements to include-fixer
 -----------------------------
 
