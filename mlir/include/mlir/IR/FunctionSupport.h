@@ -1,6 +1,6 @@
 //===- FunctionSupport.h - Utility types for function-like ops --*- C++ -*-===//
 //
-// Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
@@ -28,6 +28,13 @@ inline StringRef getTypeAttrName() { return "type"; }
 inline StringRef getArgAttrName(unsigned arg, SmallVectorImpl<char> &out) {
   out.clear();
   return ("arg" + Twine(arg)).toStringRef(out);
+}
+
+/// Returns true if the given name is a valid argument attribute name.
+inline bool isArgAttrName(StringRef name) {
+  APInt unused;
+  return name.startswith("arg") &&
+         !name.drop_front(3).getAsInteger(/*Radix=*/10, unused);
 }
 
 /// Return the name of the attribute used for function results.

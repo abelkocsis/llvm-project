@@ -379,10 +379,8 @@ static void initialize(TargetLibraryInfoImpl &TLI, const Triple &T,
   case Triple::TvOS:
   case Triple::WatchOS:
     TLI.setUnavailable(LibFunc_exp10l);
-    if (!T.isWatchOS() && (T.isOSVersionLT(7, 0) ||
-                           (T.isOSVersionLT(9, 0) &&
-                            (T.getArch() == Triple::x86 ||
-                             T.getArch() == Triple::x86_64)))) {
+    if (!T.isWatchOS() &&
+        (T.isOSVersionLT(7, 0) || (T.isOSVersionLT(9, 0) && T.isX86()))) {
       TLI.setUnavailable(LibFunc_exp10);
       TLI.setUnavailable(LibFunc_exp10f);
     } else {
@@ -661,6 +659,11 @@ bool TargetLibraryInfoImpl::isValidProtoForLibFunc(const FunctionType &FTy,
             FTy.getParamType(1)->isPointerTy() &&
             FTy.getParamType(2)->isPointerTy() &&
             FTy.getReturnType()->isIntegerTy(32));
+  case LibFunc_strlen_chk:
+    --NumParams;
+    if (!IsSizeTTy(FTy.getParamType(NumParams)))
+      return false;
+    LLVM_FALLTHROUGH;
   case LibFunc_strlen:
     return (NumParams == 1 && FTy.getParamType(0)->isPointerTy() &&
             FTy.getReturnType()->isIntegerTy());

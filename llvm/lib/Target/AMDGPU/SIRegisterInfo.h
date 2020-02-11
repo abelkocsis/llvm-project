@@ -42,6 +42,10 @@ private:
 public:
   SIRegisterInfo(const GCNSubtarget &ST);
 
+  /// \returns the sub reg enum value for the given \p Channel
+  /// (e.g. getSubRegFromChannel(0) -> AMDGPU::sub0)
+  static unsigned getSubRegFromChannel(unsigned Channel, unsigned NumRegs = 1);
+
   bool spillSGPRToVGPR() const {
     return SpillSGPRToVGPR;
   }
@@ -77,7 +81,6 @@ public:
   bool requiresFrameIndexReplacementScavenging(
     const MachineFunction &MF) const override;
   bool requiresVirtualBaseRegisters(const MachineFunction &Fn) const override;
-  bool trackLivenessAfterRegAlloc(const MachineFunction &MF) const override;
 
   int64_t getMUBUFInstrOffset(const MachineInstr *MI) const;
 
@@ -289,6 +292,21 @@ public:
 
   const uint32_t *getAllVGPRRegMask() const;
   const uint32_t *getAllAllocatableSRegMask() const;
+
+  // \returns number of 32 bit registers covered by a \p LM
+  static unsigned getNumCoveredRegs(LaneBitmask LM) {
+    return LM.getNumLanes();
+  }
+
+  // \returns a DWORD offset of a \p SubReg
+  unsigned getChannelFromSubReg(unsigned SubReg) const {
+    return SubReg ? alignTo(getSubRegIdxOffset(SubReg), 32) / 32 : 0;
+  }
+
+  // \returns a DWORD size of a \p SubReg
+  unsigned getNumChannelsFromSubReg(unsigned SubReg) const {
+    return getNumCoveredRegs(getSubRegIndexLaneMask(SubReg));
+  }
 
 private:
   void buildSpillLoadStore(MachineBasicBlock::iterator MI,

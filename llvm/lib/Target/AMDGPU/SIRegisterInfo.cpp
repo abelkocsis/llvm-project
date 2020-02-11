@@ -106,6 +106,73 @@ SIRegisterInfo::SIRegisterInfo(const GCNSubtarget &ST) :
          AGPRSetID < NumRegPressureSets);
 }
 
+// FIXME: TableGen should generate something to make this manageable for all
+// register classes. At a minimum we could use the opposite of
+// composeSubRegIndices and go up from the base 32-bit subreg.
+unsigned SIRegisterInfo::getSubRegFromChannel(unsigned Channel,
+                                              unsigned NumRegs) {
+  // Table of NumRegs sized pieces at every 32-bit offset.
+  static const uint16_t SubRegFromChannelTable[][32] = {
+      {AMDGPU::sub0,  AMDGPU::sub1,  AMDGPU::sub2,  AMDGPU::sub3,
+       AMDGPU::sub4,  AMDGPU::sub5,  AMDGPU::sub6,  AMDGPU::sub7,
+       AMDGPU::sub8,  AMDGPU::sub9,  AMDGPU::sub10, AMDGPU::sub11,
+       AMDGPU::sub12, AMDGPU::sub13, AMDGPU::sub14, AMDGPU::sub15,
+       AMDGPU::sub16, AMDGPU::sub17, AMDGPU::sub18, AMDGPU::sub19,
+       AMDGPU::sub20, AMDGPU::sub21, AMDGPU::sub22, AMDGPU::sub23,
+       AMDGPU::sub24, AMDGPU::sub25, AMDGPU::sub26, AMDGPU::sub27,
+       AMDGPU::sub28, AMDGPU::sub29, AMDGPU::sub30, AMDGPU::sub31},
+      {AMDGPU::sub0_sub1,   AMDGPU::sub1_sub2,    AMDGPU::sub2_sub3,
+       AMDGPU::sub3_sub4,   AMDGPU::sub4_sub5,    AMDGPU::sub5_sub6,
+       AMDGPU::sub6_sub7,   AMDGPU::sub7_sub8,    AMDGPU::sub8_sub9,
+       AMDGPU::sub9_sub10,  AMDGPU::sub10_sub11,  AMDGPU::sub11_sub12,
+       AMDGPU::sub12_sub13, AMDGPU::sub13_sub14,  AMDGPU::sub14_sub15,
+       AMDGPU::sub15_sub16, AMDGPU::sub16_sub17,  AMDGPU::sub17_sub18,
+       AMDGPU::sub18_sub19, AMDGPU::sub19_sub20,  AMDGPU::sub20_sub21,
+       AMDGPU::sub21_sub22, AMDGPU::sub22_sub23,  AMDGPU::sub23_sub24,
+       AMDGPU::sub24_sub25, AMDGPU::sub25_sub26,  AMDGPU::sub26_sub27,
+       AMDGPU::sub27_sub28, AMDGPU::sub28_sub29,  AMDGPU::sub29_sub30,
+       AMDGPU::sub30_sub31, AMDGPU::NoSubRegister},
+      {AMDGPU::sub0_sub1_sub2,    AMDGPU::sub1_sub2_sub3,
+       AMDGPU::sub2_sub3_sub4,    AMDGPU::sub3_sub4_sub5,
+       AMDGPU::sub4_sub5_sub6,    AMDGPU::sub5_sub6_sub7,
+       AMDGPU::sub6_sub7_sub8,    AMDGPU::sub7_sub8_sub9,
+       AMDGPU::sub8_sub9_sub10,   AMDGPU::sub9_sub10_sub11,
+       AMDGPU::sub10_sub11_sub12, AMDGPU::sub11_sub12_sub13,
+       AMDGPU::sub12_sub13_sub14, AMDGPU::sub13_sub14_sub15,
+       AMDGPU::sub14_sub15_sub16, AMDGPU::sub15_sub16_sub17,
+       AMDGPU::sub16_sub17_sub18, AMDGPU::sub17_sub18_sub19,
+       AMDGPU::sub18_sub19_sub20, AMDGPU::sub19_sub20_sub21,
+       AMDGPU::sub20_sub21_sub22, AMDGPU::sub21_sub22_sub23,
+       AMDGPU::sub22_sub23_sub24, AMDGPU::sub23_sub24_sub25,
+       AMDGPU::sub24_sub25_sub26, AMDGPU::sub25_sub26_sub27,
+       AMDGPU::sub26_sub27_sub28, AMDGPU::sub27_sub28_sub29,
+       AMDGPU::sub28_sub29_sub30, AMDGPU::sub29_sub30_sub31,
+       AMDGPU::NoSubRegister,     AMDGPU::NoSubRegister},
+      {AMDGPU::sub0_sub1_sub2_sub3,     AMDGPU::sub1_sub2_sub3_sub4,
+       AMDGPU::sub2_sub3_sub4_sub5,     AMDGPU::sub3_sub4_sub5_sub6,
+       AMDGPU::sub4_sub5_sub6_sub7,     AMDGPU::sub5_sub6_sub7_sub8,
+       AMDGPU::sub6_sub7_sub8_sub9,     AMDGPU::sub7_sub8_sub9_sub10,
+       AMDGPU::sub8_sub9_sub10_sub11,   AMDGPU::sub9_sub10_sub11_sub12,
+       AMDGPU::sub10_sub11_sub12_sub13, AMDGPU::sub11_sub12_sub13_sub14,
+       AMDGPU::sub12_sub13_sub14_sub15, AMDGPU::sub13_sub14_sub15_sub16,
+       AMDGPU::sub14_sub15_sub16_sub17, AMDGPU::sub15_sub16_sub17_sub18,
+       AMDGPU::sub16_sub17_sub18_sub19, AMDGPU::sub17_sub18_sub19_sub20,
+       AMDGPU::sub18_sub19_sub20_sub21, AMDGPU::sub19_sub20_sub21_sub22,
+       AMDGPU::sub20_sub21_sub22_sub23, AMDGPU::sub21_sub22_sub23_sub24,
+       AMDGPU::sub22_sub23_sub24_sub25, AMDGPU::sub23_sub24_sub25_sub26,
+       AMDGPU::sub24_sub25_sub26_sub27, AMDGPU::sub25_sub26_sub27_sub28,
+       AMDGPU::sub26_sub27_sub28_sub29, AMDGPU::sub27_sub28_sub29_sub30,
+       AMDGPU::sub28_sub29_sub30_sub31, AMDGPU::NoSubRegister,
+       AMDGPU::NoSubRegister,           AMDGPU::NoSubRegister}};
+
+  const unsigned NumRegIndex = NumRegs - 1;
+
+  assert(NumRegIndex < array_lengthof(SubRegFromChannelTable) &&
+         "Not implemented");
+  assert(Channel < array_lengthof(SubRegFromChannelTable[0]));
+  return SubRegFromChannelTable[NumRegIndex][Channel];
+}
+
 unsigned SIRegisterInfo::reservedPrivateSegmentBufferReg(
   const MachineFunction &MF) const {
   unsigned BaseIdx = alignDown(ST.getMaxNumSGPRs(MF), 4) - 4;
@@ -302,11 +369,6 @@ bool SIRegisterInfo::requiresFrameIndexReplacementScavenging(
 bool SIRegisterInfo::requiresVirtualBaseRegisters(
   const MachineFunction &) const {
   // There are no special dedicated stack or frame pointers.
-  return true;
-}
-
-bool SIRegisterInfo::trackLivenessAfterRegAlloc(const MachineFunction &MF) const {
-  // This helps catch bugs as verifier errors.
   return true;
 }
 
@@ -1396,7 +1458,7 @@ const TargetRegisterClass *SIRegisterInfo::getSubRegClass(
     return RC;
 
   // We can assume that each lane corresponds to one 32-bit register.
-  unsigned Count = getSubRegIndexLaneMask(SubIdx).getNumLanes();
+  unsigned Count = getNumChannelsFromSubReg(SubIdx);
   if (isSGPRClass(RC)) {
     switch (Count) {
     case 1:
@@ -1775,14 +1837,6 @@ SIRegisterInfo::getRegClassForSizeOnBank(unsigned Size,
         &AMDGPU::SReg_32_XM0_XEXECRegClass : &AMDGPU::SReg_64_XEXECRegClass;
     case AMDGPU::SGPRRegBankID:
       return &AMDGPU::SReg_32RegClass;
-    case AMDGPU::SCCRegBankID:
-      // This needs to return an allocatable class, so don't bother returning
-      // the dummy SCC class.
-      //
-      // FIXME: This is a grotesque hack. We use SGPR_32 as an indication this
-      // was not an VCC bank value since we use the larger class SReg_32 for
-      // other values. These should all use SReg_32.
-      return &AMDGPU::SGPR_32RegClass;
     default:
       llvm_unreachable("unknown register bank");
     }
@@ -1792,7 +1846,7 @@ SIRegisterInfo::getRegClassForSizeOnBank(unsigned Size,
                                                  &AMDGPU::SReg_32RegClass;
   case 64:
     return RB.getID() == AMDGPU::VGPRRegBankID ? &AMDGPU::VReg_64RegClass :
-                                                 &AMDGPU::SReg_64_XEXECRegClass;
+                                                 &AMDGPU::SReg_64RegClass;
   case 96:
     return RB.getID() == AMDGPU::VGPRRegBankID ? &AMDGPU::VReg_96RegClass :
                                                  &AMDGPU::SReg_96RegClass;

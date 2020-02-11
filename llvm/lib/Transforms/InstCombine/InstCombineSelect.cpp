@@ -1013,6 +1013,12 @@ canonicalizeMinMaxWithConstant(SelectInst &Sel, ICmpInst &Cmp,
       Cmp.getPredicate() == CanonicalPred)
     return nullptr;
 
+  // Bail out on unsimplified X-0 operand (due to some worklist management bug),
+  // as this may cause an infinite combine loop. Let the sub be folded first.
+  if (match(LHS, m_Sub(m_Value(), m_Zero())) ||
+      match(RHS, m_Sub(m_Value(), m_Zero())))
+    return nullptr;
+
   // Create the canonical compare and plug it into the select.
   Sel.setCondition(Builder.CreateICmp(CanonicalPred, LHS, RHS));
 
@@ -1067,10 +1073,11 @@ static Instruction *canonicalizeAbsNabs(SelectInst &Sel, ICmpInst &Cmp,
   if (CmpCanonicalized && RHSCanonicalized)
     return nullptr;
 
-  // If RHS is used by other instructions except compare and select, don't
-  // canonicalize it to not increase the instruction count.
-  if (!(RHS->hasOneUse() || (RHS->hasNUses(2) && CmpUsesNegatedOp)))
-    return nullptr;
+  // If RHS is not canonical but is used by other instructions, don't
+  // canonicalize it and potentially increase the instruction count.
+  if (!RHSCanonicalized)
+    if (!(RHS->hasOneUse() || (RHS->hasNUses(2) && CmpUsesNegatedOp)))
+      return nullptr;
 
   // Create the canonical compare: icmp slt LHS 0.
   if (!CmpCanonicalized) {
@@ -2317,6 +2324,48 @@ static Instruction *foldSelectRotate(SelectInst &Sel) {
   return IntrinsicInst::Create(F, { TVal, TVal, ShAmt });
 }
 
+static Instruction *foldSelectToCopysign(SelectInst &Sel,
+                                         InstCombiner::BuilderTy &Builder) {
+  Value *Cond = Sel.getCondition();
+  Value *TVal = Sel.getTrueValue();
+  Value *FVal = Sel.getFalseValue();
+  Type *SelType = Sel.getType();
+
+  // Match select ?, TC, FC where the constants are equal but negated.
+  // TODO: Generalize to handle a negated variable operand?
+  const APFloat *TC, *FC;
+  if (!match(TVal, m_APFloat(TC)) || !match(FVal, m_APFloat(FC)) ||
+      !abs(*TC).bitwiseIsEqual(abs(*FC)))
+    return nullptr;
+
+  assert(TC != FC && "Expected equal select arms to simplify");
+
+  Value *X;
+  const APInt *C;
+  bool IsTrueIfSignSet;
+  ICmpInst::Predicate Pred;
+  if (!match(Cond, m_OneUse(m_ICmp(Pred, m_BitCast(m_Value(X)), m_APInt(C)))) ||
+      !isSignBitCheck(Pred, *C, IsTrueIfSignSet) || X->getType() != SelType)
+    return nullptr;
+
+  // If needed, negate the value that will be the sign argument of the copysign:
+  // (bitcast X) <  0 ? -TC :  TC --> copysign(TC,  X)
+  // (bitcast X) <  0 ?  TC : -TC --> copysign(TC, -X)
+  // (bitcast X) >= 0 ? -TC :  TC --> copysign(TC, -X)
+  // (bitcast X) >= 0 ?  TC : -TC --> copysign(TC,  X)
+  if (IsTrueIfSignSet ^ TC->isNegative())
+    X = Builder.CreateFNegFMF(X, &Sel);
+
+  // Canonicalize the magnitude argument as the positive constant since we do
+  // not care about its sign.
+  Value *MagArg = TC->isNegative() ? FVal : TVal;
+  Function *F = Intrinsic::getDeclaration(Sel.getModule(), Intrinsic::copysign,
+                                          Sel.getType());
+  Instruction *CopySign = IntrinsicInst::Create(F, { MagArg, X });
+  CopySign->setFastMathFlags(Sel.getFastMathFlags());
+  return CopySign;
+}
+
 Instruction *InstCombiner::visitSelectInst(SelectInst &SI) {
   Value *CondVal = SI.getCondition();
   Value *TrueVal = SI.getTrueValue();
@@ -2359,10 +2408,9 @@ Instruction *InstCombiner::visitSelectInst(SelectInst &SI) {
     // Swap true/false values and condition.
     CmpInst *Cond = cast<CmpInst>(CondVal);
     Cond->setPredicate(CmpInst::getInversePredicate(Pred));
-    SI.setOperand(1, FalseVal);
-    SI.setOperand(2, TrueVal);
+    SI.swapValues();
     SI.swapProfMetadata();
-    Worklist.Add(Cond);
+    Worklist.push(Cond);
     return &SI;
   }
 
@@ -2705,14 +2753,14 @@ Instruction *InstCombiner::visitSelectInst(SelectInst &SI) {
     if (auto *TrueBOSI = dyn_cast<SelectInst>(TrueBO->getOperand(0))) {
       if (TrueBOSI->getCondition() == CondVal) {
         TrueBO->setOperand(0, TrueBOSI->getTrueValue());
-        Worklist.Add(TrueBO);
+        Worklist.push(TrueBO);
         return &SI;
       }
     }
     if (auto *TrueBOSI = dyn_cast<SelectInst>(TrueBO->getOperand(1))) {
       if (TrueBOSI->getCondition() == CondVal) {
         TrueBO->setOperand(1, TrueBOSI->getTrueValue());
-        Worklist.Add(TrueBO);
+        Worklist.push(TrueBO);
         return &SI;
       }
     }
@@ -2725,14 +2773,14 @@ Instruction *InstCombiner::visitSelectInst(SelectInst &SI) {
     if (auto *FalseBOSI = dyn_cast<SelectInst>(FalseBO->getOperand(0))) {
       if (FalseBOSI->getCondition() == CondVal) {
         FalseBO->setOperand(0, FalseBOSI->getFalseValue());
-        Worklist.Add(FalseBO);
+        Worklist.push(FalseBO);
         return &SI;
       }
     }
     if (auto *FalseBOSI = dyn_cast<SelectInst>(FalseBO->getOperand(1))) {
       if (FalseBOSI->getCondition() == CondVal) {
         FalseBO->setOperand(1, FalseBOSI->getFalseValue());
-        Worklist.Add(FalseBO);
+        Worklist.push(FalseBO);
         return &SI;
       }
     }
@@ -2741,8 +2789,7 @@ Instruction *InstCombiner::visitSelectInst(SelectInst &SI) {
   Value *NotCond;
   if (match(CondVal, m_Not(m_Value(NotCond)))) {
     SI.setOperand(0, NotCond);
-    SI.setOperand(1, FalseVal);
-    SI.setOperand(2, TrueVal);
+    SI.swapValues();
     SI.swapProfMetadata();
     return &SI;
   }
@@ -2784,6 +2831,9 @@ Instruction *InstCombiner::visitSelectInst(SelectInst &SI) {
 
   if (Instruction *Rot = foldSelectRotate(SI))
     return Rot;
+
+  if (Instruction *Copysign = foldSelectToCopysign(SI, Builder))
+    return Copysign;
 
   return nullptr;
 }
