@@ -73,13 +73,23 @@ void SpuriouslyWakeUpFunctionsCheck::registerMatchers(MatchFinder *Finder) {
   } else {
     // Check for `CON36-C`
     Finder->addMatcher(
-        ifStmt(hasDescendant(compoundStmt(
+
+        ifStmt(
             allOf(hasWaitDescendantC,
-                  unless(anyOf(hasDescendant(ifStmt(hasDescendant(
-                                   compoundStmt(hasWaitDescendantC)))),
+                  unless(anyOf(hasDescendant(ifStmt(hasWaitDescendantC)),
                                hasDescendant(whileStmt(hasWaitDescendantC)),
                                hasDescendant(forStmt(hasWaitDescendantC)),
-                               hasDescendant(doStmt(hasWaitDescendantC)))))))),
+                               hasDescendant(doStmt(hasWaitDescendantC)),
+                               hasParent(whileStmt()),
+                               hasParent(compoundStmt(hasParent(whileStmt()))),
+                               hasParent(forStmt()),
+                               hasParent(compoundStmt(hasParent(forStmt()))),
+                               hasParent(doStmt()),
+                               hasParent(compoundStmt(hasParent(doStmt())))))
+
+                      ))
+
+            ,
         this);
   }
 }

@@ -28,59 +28,137 @@ void consume_list_element(void) {
       // CHECK-MESSAGES: :[[@LINE-1]]:14: warning: 'cnd_wait' should be placed inside a while statement [bugprone-spuriously-wake-up-functions]
     }
   }
+  if (list_c.next == NULL)
+    if (0 != cnd_wait(&condition_c, &lock))
+      // CHECK-MESSAGES: :[[@LINE-1]]:14: warning: 'cnd_wait' should be placed inside a while statement [bugprone-spuriously-wake-up-functions]
+      ;
+  if (list_c.next == NULL && 0 != cnd_wait(&condition_c, &lock))
+    // CHECK-MESSAGES: :[[@LINE-1]]:35: warning: 'cnd_wait' should be placed inside a while statement [bugprone-spuriously-wake-up-functions]
+    ;
   while (list_c.next == NULL) {
     if (0 != cnd_wait(&condition_c, &lock)) {
     }
   }
+  while (list_c.next == NULL)
+    if (0 != cnd_wait(&condition_c, &lock)) {
+    }
+  while (list_c.next == NULL)
+    if (0 != cnd_wait(&condition_c, &lock))
+      ;
   if (list_c.next == NULL) {
     cnd_wait(&condition_c, &lock);
     // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: 'cnd_wait' should be placed inside a while statement [bugprone-spuriously-wake-up-functions]
   }
+  if (list_c.next == NULL)
+    cnd_wait(&condition_c, &lock);
+  // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: 'cnd_wait' should be placed inside a while statement [bugprone-spuriously-wake-up-functions]
   while (list_c.next == NULL) {
     cnd_wait(&condition_c, &lock);
   }
+  while (list_c.next == NULL)
+    cnd_wait(&condition_c, &lock);
+
   do {
     if (0 != cnd_wait(&condition_c, &lock)) {
     }
   } while (list_c.next == NULL);
+  do
+    if (0 != cnd_wait(&condition_c, &lock)) {
+    }
+  while (list_c.next == NULL);
+  do
+    if (0 != cnd_wait(&condition_c, &lock))
+      ;
+  while (list_c.next == NULL);
   do {
     cnd_wait(&condition_c, &lock);
   } while (list_c.next == NULL);
+  do
+    cnd_wait(&condition_c, &lock);
+  while (list_c.next == NULL);
   for (;; list_c.next == NULL) {
     if (0 != cnd_wait(&condition_c, &lock)) {
     }
   }
+  for (;; list_c.next == NULL)
+    if (0 != cnd_wait(&condition_c, &lock)) {
+    }
+  for (;; list_c.next == NULL)
+    if (0 != cnd_wait(&condition_c, &lock))
+      ;
   for (;; list_c.next == NULL) {
     cnd_wait(&condition_c, &lock);
   }
+  for (;; list_c.next == NULL)
+    cnd_wait(&condition_c, &lock);
+
   if (list_c.next == NULL) {
     if (0 != cnd_timedwait(&condition_c, &lock, &ts)) {
       // CHECK-MESSAGES: :[[@LINE-1]]:14: warning: 'cnd_timedwait' should be placed inside a while statement [bugprone-spuriously-wake-up-functions]
     }
   }
+  if (list_c.next == NULL)
+    if (0 != cnd_timedwait(&condition_c, &lock, &ts))
+      // CHECK-MESSAGES: :[[@LINE-1]]:14: warning: 'cnd_timedwait' should be placed inside a while statement [bugprone-spuriously-wake-up-functions]
+      ;
+  if (list_c.next == NULL && 0 != cnd_timedwait(&condition_c, &lock, &ts))
+    // CHECK-MESSAGES: :[[@LINE-1]]:35: warning: 'cnd_timedwait' should be placed inside a while statement [bugprone-spuriously-wake-up-functions]
+    ;
   while (list_c.next == NULL) {
     if (0 != cnd_timedwait(&condition_c, &lock, &ts)) {
     }
   }
+  while (list_c.next == NULL)
+    if (0 != cnd_timedwait(&condition_c, &lock, &ts)) {
+    }
+  while (list_c.next == NULL)
+    if (0 != cnd_timedwait(&condition_c, &lock, &ts))
+      ;
   if (list_c.next == NULL) {
     cnd_timedwait(&condition_c, &lock, &ts);
     // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: 'cnd_timedwait' should be placed inside a while statement [bugprone-spuriously-wake-up-functions]
   }
+  if (list_c.next == NULL)
+    cnd_timedwait(&condition_c, &lock, &ts);
+  // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: 'cnd_timedwait' should be placed inside a while statement [bugprone-spuriously-wake-up-functions]
   while (list_c.next == NULL) {
     cnd_timedwait(&condition_c, &lock, &ts);
   }
+  while (list_c.next == NULL)
+    cnd_timedwait(&condition_c, &lock, &ts);
+
   do {
     if (0 != cnd_timedwait(&condition_c, &lock, &ts)) {
     }
   } while (list_c.next == NULL);
+  do
+    if (0 != cnd_timedwait(&condition_c, &lock, &ts)) {
+    }
+  while (list_c.next == NULL);
+  do
+    if (0 != cnd_timedwait(&condition_c, &lock, &ts))
+      ;
+  while (list_c.next == NULL);
   do {
     cnd_timedwait(&condition_c, &lock, &ts);
   } while (list_c.next == NULL);
+  do
+    cnd_timedwait(&condition_c, &lock, &ts);
+  while (list_c.next == NULL);
   for (;; list_c.next == NULL) {
     if (0 != cnd_timedwait(&condition_c, &lock, &ts)) {
     }
   }
+  for (;; list_c.next == NULL)
+    if (0 != cnd_timedwait(&condition_c, &lock, &ts)) {
+    }
+  for (;; list_c.next == NULL)
+    if (0 != cnd_timedwait(&condition_c, &lock, &ts))
+      ;
   for (;; list_c.next == NULL) {
     cnd_timedwait(&condition_c, &lock, &ts);
   }
+  for (;; list_c.next == NULL)
+    cnd_timedwait(&condition_c, &lock, &ts);
 }
+int main() { return 0; }
