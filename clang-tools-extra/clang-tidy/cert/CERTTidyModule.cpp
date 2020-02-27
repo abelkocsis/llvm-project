@@ -11,6 +11,7 @@
 #include "../ClangTidyModuleRegistry.h"
 #include "../bugprone/BadSignalToKillThreadCheck.h"
 #include "../bugprone/ReservedIdentifierCheck.h"
+#include "../bugprone/SignalInMultithreadedProgramCheck.h"
 #include "../bugprone/UnhandledSelfAssignmentCheck.h"
 #include "../google/UnnamedNamespaceInHeaderCheck.h"
 #include "../misc/NewDeleteOverloadsCheck.h"
@@ -80,6 +81,8 @@ public:
         "cert-oop58-cpp");
 
     // C checkers
+    // CON
+    CheckFactories.registerCheck<bugprone::SignalInMultithreadedProgramCheck>("cert-con37-c");
     // DCL
     CheckFactories.registerCheck<misc::StaticAssertCheck>("cert-dcl03-c");
     CheckFactories.registerCheck<readability::UppercaseLiteralSuffixCheck>(

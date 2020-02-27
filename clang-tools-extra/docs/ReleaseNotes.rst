@@ -82,6 +82,15 @@ New checks
 
   Checks for usages of identifiers reserved for use by the implementation.
 
+- New :doc:`bugprone-signal-in-multithreaded-program
+  <clang-tidy/checks/bugprone-signal-in-multithreaded-program>` check.
+
+  Finds ``signal`` function calls when the program is multithreaded. It
+  founds a program multithreaded when it finds at least one function call
+  of the following: ``thrd_create``, ``std::thread``, ``boost::thread``,
+  ``dlib::thread_function``, ``dlib::thread_pool``,
+  ``dlib::default_thread_pool``, ``pthread_t``.
+
 - New :doc:`cert-oop57-cpp
   <clang-tidy/checks/cert-oop57-cpp>` check.
 
@@ -100,6 +109,10 @@ New checks
 
 New check aliases
 ^^^^^^^^^^^^^^^^^
+- New alias :doc:`cert-con37-c
+  <clang-tidy/checks/cert-con37-c>` to
+  :doc:`bugprone-signal-in-multithreaded-program
+  <clang-tidy/checks/bugprone-signal-in-multithreaded-program>` was added.
 
 - New alias :doc:`cert-dcl37-c
   <clang-tidy/checks/cert-dcl37-c>` to

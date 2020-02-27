@@ -73,6 +73,7 @@ Clang-Tidy Checks
    `bugprone-parent-virtual-call <bugprone-parent-virtual-call.html>`_, "Yes"
    `bugprone-posix-return <bugprone-posix-return.html>`_, "Yes"
    `bugprone-reserved-identifier <bugprone-reserved-identifier.html>`_, "Yes"
+   `bugprone-signal-in-multithreaded-program <bugprone-signal-in-multithreaded-program.html>`_,
    `bugprone-signed-char-misuse <bugprone-signed-char-misuse.html>`_,
    `bugprone-sizeof-container <bugprone-sizeof-container.html>`_,
    `bugprone-sizeof-expression <bugprone-sizeof-expression.html>`_,
@@ -95,6 +96,7 @@ Clang-Tidy Checks
    `bugprone-unused-return-value <bugprone-unused-return-value.html>`_,
    `bugprone-use-after-move <bugprone-use-after-move.html>`_,
    `bugprone-virtual-near-miss <bugprone-virtual-near-miss.html>`_, "Yes"
+   `cert-con37-c <cert-con37-c.html>`_,
    `cert-dcl21-cpp <cert-dcl21-cpp.html>`_,
    `cert-dcl50-cpp <cert-dcl50-cpp.html>`_,
    `cert-dcl58-cpp <cert-dcl58-cpp.html>`_,

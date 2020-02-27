@@ -38,6 +38,7 @@
 #include "ParentVirtualCallCheck.h"
 #include "PosixReturnCheck.h"
 #include "ReservedIdentifierCheck.h"
+#include "SignalInMultithreadedProgramCheck.h"
 #include "SignedCharMisuseCheck.h"
 #include "SizeofContainerCheck.h"
 #include "SizeofExpressionCheck.h"
@@ -126,6 +127,8 @@ public:
         "bugprone-posix-return");
     CheckFactories.registerCheck<ReservedIdentifierCheck>(
         "bugprone-reserved-identifier");
+    CheckFactories.registerCheck<SignalInMultithreadedProgramCheck>(
+        "bugprone-signal-in-multithreaded-program");
     CheckFactories.registerCheck<SignedCharMisuseCheck>(
         "bugprone-signed-char-misuse");
     CheckFactories.registerCheck<SizeofContainerCheck>(
