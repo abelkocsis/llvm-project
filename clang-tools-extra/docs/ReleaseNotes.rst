@@ -88,8 +88,7 @@ New checks
   Finds ``signal`` function calls when the program is multithreaded. It
   founds a program multithreaded when it finds at least one function call
   of the following: ``thrd_create``, ``std::thread``, ``boost::thread``,
-  ``dlib::thread_function``, ``dlib::thread_pool``,
-  ``dlib::default_thread_pool``, ``pthread_t``.
+  ``pthread_t``.
 
 - New :doc:`cert-oop57-cpp
   <clang-tidy/checks/cert-oop57-cpp>` check.
@@ -109,6 +108,7 @@ New checks
 
 New check aliases
 ^^^^^^^^^^^^^^^^^
+
 - New alias :doc:`cert-con37-c
   <clang-tidy/checks/cert-con37-c>` to
   :doc:`bugprone-signal-in-multithreaded-program
