@@ -4,6 +4,7 @@ add_llvm_library(MLIRTestTransforms
   TestConstantFold.cpp
   TestLoopFusion.cpp
   TestGpuMemoryPromotion.cpp
+  TestGpuParallelLoopMapping.cpp
   TestInlining.cpp
   TestLinalgTransforms.cpp
   TestLiveness.cpp
@@ -20,17 +21,21 @@ add_llvm_library(MLIRTestTransforms
 
   ADDITIONAL_HEADER_DIRS
   ${MLIR_MAIN_INCLUDE_DIR}/mlir/Transforms
+
+  DEPENDS
+  MLIRStandardOpsIncGen
+  MLIRTestLinalgTransformPatternsIncGen
+  MLIRTestVectorTransformPatternsIncGen
 )
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../TestDialect)
 include_directories(${CMAKE_CURRENT_BINARY_DIR}/../TestDialect)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../DeclarativeTransforms)
 include_directories(${CMAKE_CURRENT_BINARY_DIR}/../DeclarativeTransforms)
-add_dependencies(MLIRTestTransforms MLIRStandardOpsIncGen)
-add_dependencies(MLIRTestTransforms MLIRTestLinalgTransformPatternsIncGen)
-add_dependencies(MLIRTestTransforms MLIRTestVectorTransformPatternsIncGen)
+
 target_link_libraries(MLIRTestTransforms
-  MLIRAffineOps
+  PUBLIC
+  MLIRAffine
   MLIRAnalysis
   MLIREDSC
   MLIRGPU
@@ -39,8 +44,9 @@ target_link_libraries(MLIRTestTransforms
   MLIRLoopOps
   MLIRGPU
   MLIRPass
+  MLIRStandardToStandard
   MLIRTestDialect
   MLIRTransformUtils
   MLIRVectorToLoops
-  MLIRVectorOps
+  MLIRVector
   )

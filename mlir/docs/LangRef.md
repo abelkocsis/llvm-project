@@ -745,11 +745,16 @@ Syntax:
 
 ```
 // Sized integers like i1, i4, i8, i16, i32.
-integer-type ::= `i` [1-9][0-9]*
+signed-integer-type ::= `si` [1-9][0-9]*
+unsigned-integer-type ::= `ui` [1-9][0-9]*
+signless-integer-type ::= `i` [1-9][0-9]*
+integer-type ::= signed-integer-type |
+                 unsigned-integer-type |
+                 signless-integer-type
 ```
 
-MLIR supports arbitrary precision integer types. Integer types are signless, but
-have a designated width.
+MLIR supports arbitrary precision integer types. Integer types have a designated
+width and may have signedness semantics.
 
 **Rationale:** low precision integers (like `i2`, `i4` etc) are useful for
 low-precision inference chips, and arbitrary precision integers are useful for
@@ -897,7 +902,7 @@ memref<16x32xf32, #identity, memspace0>
 %T = alloc(%M, %N) [%B1, %B2] : memref<?x?xf32, #tiled_dynamic>
 
 // A memref that has a two-element padding at either end. The allocation size
-// will fit 16 * 68 float elements of data.
+// will fit 16 * 64 float elements of data.
 %P = alloc() : memref<16x64xf32, #padded>
 
 // Affine map with symbol 's0' used as offset for the first dimension.
@@ -1151,7 +1156,8 @@ attribute-dict ::= `{` `}`
 attribute-entry ::= dialect-attribute-entry | dependent-attribute-entry
 dialect-attribute-entry ::= dialect-namespace `.` bare-id `=` attribute-value
 dependent-attribute-entry ::= dependent-attribute-name `=` attribute-value
-dependent-attribute-name ::= (letter|[_]) (letter|digit|[_$])*
+dependent-attribute-name ::= ((letter|[_]) (letter|digit|[_$])*)
+                           | string-literal
 ```
 
 Attributes are the mechanism for specifying constant data on operations in

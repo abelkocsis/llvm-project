@@ -52,15 +52,14 @@ void GPUToSPIRVPass::runOnModule() {
     kernelModules.push_back(builder.clone(*moduleOp.getOperation()));
   });
 
-  SPIRVTypeConverter typeConverter;
+  auto targetAttr = spirv::lookupTargetEnvOrDefault(module);
+  std::unique_ptr<ConversionTarget> target =
+      spirv::SPIRVConversionTarget::get(targetAttr);
+
+  SPIRVTypeConverter typeConverter(targetAttr);
   OwningRewritePatternList patterns;
   populateGPUToSPIRVPatterns(context, typeConverter, patterns);
   populateStandardToSPIRVPatterns(context, typeConverter, patterns);
-
-  std::unique_ptr<ConversionTarget> target = spirv::SPIRVConversionTarget::get(
-      spirv::lookupTargetEnvOrDefault(module), context);
-  target->addDynamicallyLegalOp<FuncOp>(
-      [&](FuncOp op) { return typeConverter.isSignatureLegal(op.getType()); });
 
   if (failed(applyFullConversion(kernelModules, *target, patterns,
                                  &typeConverter))) {

@@ -76,8 +76,8 @@ protected:
     TU.ExtraArgs = Flags;
     auto AST = TU.build();
     llvm::Annotations::Range R = A.range();
-    SelectionTree Selection(AST.getASTContext(), AST.getTokens(), R.Begin,
-                            R.End);
+    auto Selection = SelectionTree::createRight(
+        AST.getASTContext(), AST.getTokens(), R.Begin, R.End);
     const SelectionTree::Node *N = Selection.commonAncestor();
     if (!N) {
       ADD_FAILURE() << "No node selected!\n" << Code;
@@ -215,8 +215,7 @@ TEST_F(TargetDeclTest, NestedNameSpecifier) {
     template <typename T>
     int x = [[T::]]y;
   )cpp";
-  // FIXME: We don't do a good job printing TemplateTypeParmDecls, apparently!
-  EXPECT_DECLS("NestedNameSpecifierLoc", "");
+  EXPECT_DECLS("NestedNameSpecifierLoc", "typename T");
 
   Code = R"cpp(
     namespace a { int x; }
@@ -256,8 +255,7 @@ TEST_F(TargetDeclTest, Types) {
     template<class T>
     void foo() { [[T]] x; }
   )cpp";
-  // FIXME: We don't do a good job printing TemplateTypeParmDecls, apparently!
-  EXPECT_DECLS("TemplateTypeParmTypeLoc", "");
+  EXPECT_DECLS("TemplateTypeParmTypeLoc", "class T");
   Flags.clear();
 
   // FIXME: Auto-completion in a template requires disabling delayed template
@@ -290,8 +288,7 @@ TEST_F(TargetDeclTest, Types) {
       static const int size = sizeof...([[E]]);
     };
   )cpp";
-  // FIXME: We don't do a good job printing TemplateTypeParmDecls, apparently!
-  EXPECT_DECLS("SizeOfPackExpr", "");
+  EXPECT_DECLS("SizeOfPackExpr", "typename ...E");
 
   Code = R"cpp(
     template <typename T>
@@ -311,6 +308,16 @@ TEST_F(TargetDeclTest, ClassTemplate) {
   EXPECT_DECLS("TemplateSpecializationTypeLoc",
                {"template<> class Foo<42>", Rel::TemplateInstantiation},
                {"class Foo", Rel::TemplatePattern});
+
+  Code = R"cpp(
+    template<typename T> class Foo {};
+    // The "Foo<int>" SpecializationDecl is incomplete, there is no
+    // instantiation happening.
+    void func([[Foo<int>]] *);
+  )cpp";
+  EXPECT_DECLS("TemplateSpecializationTypeLoc",
+               {"class Foo", Rel::TemplatePattern},
+               {"template<> class Foo<int>", Rel::TemplateInstantiation});
 
   Code = R"cpp(
     // Explicit specialization.

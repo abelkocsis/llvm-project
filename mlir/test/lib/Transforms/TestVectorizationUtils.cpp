@@ -13,8 +13,8 @@
 #include "mlir/Analysis/AffineAnalysis.h"
 #include "mlir/Analysis/NestedMatcher.h"
 #include "mlir/Analysis/SliceAnalysis.h"
-#include "mlir/Dialect/AffineOps/AffineOps.h"
-#include "mlir/Dialect/VectorOps/VectorUtils.h"
+#include "mlir/Dialect/Affine/IR/AffineOps.h"
+#include "mlir/Dialect/Vector/VectorUtils.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/StandardTypes.h"
@@ -281,12 +281,9 @@ void VectorizerTestPass::runOnFunction() {
   }
 }
 
-std::unique_ptr<OpPassBase<FuncOp>> mlir::createVectorizerTestPass() {
-  return std::make_unique<VectorizerTestPass>();
+namespace mlir {
+void registerVectorizerTestPass() {
+  PassRegistration<VectorizerTestPass> pass(
+      "affine-vectorizer-test", "Tests vectorizer standalone functionality.");
 }
-
-static PassRegistration<VectorizerTestPass>
-    pass("affine-vectorizer-test",
-         "Tests vectorizer standalone functionality.");
-
-#undef DEBUG_TYPE
+} // namespace mlir

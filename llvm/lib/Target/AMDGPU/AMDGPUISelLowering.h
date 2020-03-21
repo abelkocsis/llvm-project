@@ -52,8 +52,6 @@ protected:
   SDValue LowerFRINT(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFNEARBYINT(SDValue Op, SelectionDAG &DAG) const;
 
-  SDValue LowerFROUND_LegalFTRUNC(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerFROUND64(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFROUND(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFFLOOR(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFLOG(SDValue Op, SelectionDAG &DAG,
@@ -172,10 +170,14 @@ public:
   bool isZExtFree(EVT Src, EVT Dest) const override;
   bool isZExtFree(SDValue Val, EVT VT2) const override;
 
-  char isNegatibleForFree(SDValue Op, SelectionDAG &DAG, bool LegalOperations,
-                          bool ForCodeSize, unsigned Depth) const override;
+  NegatibleCost getNegatibleCost(SDValue Op, SelectionDAG &DAG,
+                                 bool LegalOperations, bool ForCodeSize,
+                                 unsigned Depth) const override;
 
   bool isNarrowingProfitable(EVT VT1, EVT VT2) const override;
+
+  EVT getTypeForExtReturn(LLVMContext &Context, EVT VT,
+                          ISD::NodeType ExtendKind) const override;
 
   MVT getVectorIdxTy(const DataLayout &) const override;
   bool isSelectSupported(SelectSupportKind) const override;

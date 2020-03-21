@@ -16,8 +16,8 @@
 #include "mlir/Analysis/AffineStructures.h"
 #include "mlir/Analysis/Passes.h"
 #include "mlir/Analysis/Utils.h"
-#include "mlir/Dialect/AffineOps/AffineOps.h"
-#include "mlir/Dialect/StandardOps/Ops.h"
+#include "mlir/Dialect/Affine/IR/AffineOps.h"
+#include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/Pass/Pass.h"
 #include "llvm/Support/Debug.h"
@@ -48,6 +48,9 @@ void TestMemRefBoundCheck::runOnFunction() {
   });
 }
 
-static PassRegistration<TestMemRefBoundCheck>
-    memRefBoundCheck("test-memref-bound-check",
-                     "Check memref access bounds in a Function");
+namespace mlir {
+void registerMemRefBoundCheck() {
+  PassRegistration<TestMemRefBoundCheck>(
+      "test-memref-bound-check", "Check memref access bounds in a Function");
+}
+} // namespace mlir

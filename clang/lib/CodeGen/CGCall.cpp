@@ -1748,11 +1748,10 @@ void CodeGenModule::ConstructDefaultFnAttrList(StringRef Name, bool HasOptnone,
     if (CodeGenOpts.NullPointerIsValid)
       FuncAttrs.addAttribute("null-pointer-is-valid", "true");
 
-    // TODO: Omit attribute when the default is IEEE.
-    if (CodeGenOpts.FPDenormalMode.isValid())
+    if (CodeGenOpts.FPDenormalMode != llvm::DenormalMode::getIEEE())
       FuncAttrs.addAttribute("denormal-fp-math",
                              CodeGenOpts.FPDenormalMode.str());
-    if (CodeGenOpts.FP32DenormalMode.isValid()) {
+    if (CodeGenOpts.FP32DenormalMode != CodeGenOpts.FPDenormalMode) {
       FuncAttrs.addAttribute(
           "denormal-fp-math-f32",
           CodeGenOpts.FP32DenormalMode.str());
@@ -1906,6 +1905,13 @@ void CodeGenModule::ConstructAttributeList(
     if (const FunctionDecl *Fn = dyn_cast<FunctionDecl>(TargetDecl)) {
       AddAttributesFromFunctionProtoType(
           getContext(), FuncAttrs, Fn->getType()->getAs<FunctionProtoType>());
+      if (AttrOnCallSite && Fn->isReplaceableGlobalAllocationFunction()) {
+        // A sane operator new returns a non-aliasing pointer.
+        auto Kind = Fn->getDeclName().getCXXOverloadedOperator();
+        if (getCodeGenOpts().AssumeSaneOperatorNew &&
+            (Kind == OO_New || Kind == OO_Array_New))
+          RetAttrs.addAttribute(llvm::Attribute::NoAlias);
+      }
       const CXXMethodDecl *MD = dyn_cast<CXXMethodDecl>(Fn);
       const bool IsVirtualCall = MD && MD->isVirtual();
       // Don't use [[noreturn]], _Noreturn or [[no_builtin]] for a call to a
@@ -2370,6 +2376,9 @@ void CodeGenFunction::EmitFunctionProlog(const CGFunctionInfo &FI,
       auto FieldIndex = ArgI.getInAllocaFieldIndex();
       Address V =
           Builder.CreateStructGEP(ArgStruct, FieldIndex, Arg->getName());
+      if (ArgI.getInAllocaIndirect())
+        V = Address(Builder.CreateLoad(V),
+                    getContext().getTypeAlignInChars(Ty));
       ArgVals.push_back(ParamValue::forIndirect(V));
       break;
     }
@@ -3689,24 +3698,7 @@ void CodeGenFunction::EmitCallArg(CallArgList &args, const Expr *E,
     return;
   }
 
-  AggValueSlot ArgSlot = AggValueSlot::ignored();
-  Address ArgSlotAlloca = Address::invalid();
-  if (hasAggregateEvaluationKind(E->getType())) {
-    ArgSlot = CreateAggTemp(E->getType(), "agg.tmp", &ArgSlotAlloca);
-
-    // Emit a lifetime start/end for this temporary. If the type has a
-    // destructor, then we need to keep it alive. FIXME: We should still be able
-    // to end the lifetime after the destructor returns.
-    if (!E->getType().isDestructedType()) {
-      uint64_t size =
-          CGM.getDataLayout().getTypeAllocSize(ConvertTypeForMem(E->getType()));
-      if (auto *lifetimeSize =
-              EmitLifetimeStart(size, ArgSlotAlloca.getPointer()))
-        args.addLifetimeCleanup({ArgSlotAlloca.getPointer(), lifetimeSize});
-    }
-  }
-
-  args.add(EmitAnyExpr(E, ArgSlot), type);
+  args.add(EmitAnyExprToTemp(E), type);
 }
 
 QualType CodeGenFunction::getVarArgType(const Expr *Arg) {
@@ -3906,6 +3898,10 @@ public:
     const auto *AlignmentCI = dyn_cast<llvm::ConstantInt>(Alignment);
     if (!AlignmentCI)
       return Attrs;
+    // We may legitimately have non-power-of-2 alignment here.
+    // If so, this is UB land, emit it via `@llvm.assume` instead.
+    if (!AlignmentCI->getValue().isPowerOf2())
+      return Attrs;
     llvm::AttributeList NewAttrs = maybeRaiseRetAlignmentAttribute(
         CGF.getLLVMContext(), Attrs,
         llvm::Align(
@@ -3920,7 +3916,7 @@ public:
   void EmitAsAnAssumption(SourceLocation Loc, QualType RetTy, RValue &Ret) {
     if (!AA)
       return;
-    CGF.EmitAlignmentAssumption(Ret.getScalarVal(), RetTy, Loc,
+    CGF.emitAlignmentAssumption(Ret.getScalarVal(), RetTy, Loc,
                                 AA->getLocation(), Alignment, OffsetCI);
     AA = nullptr; // We're done. Disallow doing anything else.
   }
@@ -4091,18 +4087,39 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
       assert(NumIRArgs == 0);
       assert(getTarget().getTriple().getArch() == llvm::Triple::x86);
       if (I->isAggregate()) {
-        // Replace the placeholder with the appropriate argument slot GEP.
         Address Addr = I->hasLValue()
                            ? I->getKnownLValue().getAddress(*this)
                            : I->getKnownRValue().getAggregateAddress();
         llvm::Instruction *Placeholder =
             cast<llvm::Instruction>(Addr.getPointer());
-        CGBuilderTy::InsertPoint IP = Builder.saveIP();
-        Builder.SetInsertPoint(Placeholder);
-        Addr =
-            Builder.CreateStructGEP(ArgMemory, ArgInfo.getInAllocaFieldIndex());
-        Builder.restoreIP(IP);
+
+        if (!ArgInfo.getInAllocaIndirect()) {
+          // Replace the placeholder with the appropriate argument slot GEP.
+          CGBuilderTy::InsertPoint IP = Builder.saveIP();
+          Builder.SetInsertPoint(Placeholder);
+          Addr = Builder.CreateStructGEP(ArgMemory,
+                                         ArgInfo.getInAllocaFieldIndex());
+          Builder.restoreIP(IP);
+        } else {
+          // For indirect things such as overaligned structs, replace the
+          // placeholder with a regular aggregate temporary alloca. Store the
+          // address of this alloca into the struct.
+          Addr = CreateMemTemp(info_it->type, "inalloca.indirect.tmp");
+          Address ArgSlot = Builder.CreateStructGEP(
+              ArgMemory, ArgInfo.getInAllocaFieldIndex());
+          Builder.CreateStore(Addr.getPointer(), ArgSlot);
+        }
         deferPlaceholderReplacement(Placeholder, Addr.getPointer());
+      } else if (ArgInfo.getInAllocaIndirect()) {
+        // Make a temporary alloca and store the address of it into the argument
+        // struct.
+        Address Addr = CreateMemTempWithoutCast(
+            I->Ty, getContext().getTypeAlignInChars(I->Ty),
+            "indirect-arg-temp");
+        I->copyInto(*this, Addr);
+        Address ArgSlot =
+            Builder.CreateStructGEP(ArgMemory, ArgInfo.getInAllocaFieldIndex());
+        Builder.CreateStore(Addr.getPointer(), ArgSlot);
       } else {
         // Store the RValue into the argument struct.
         Address Addr =
@@ -4479,8 +4496,9 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
   // Update the largest vector width if any arguments have vector types.
   for (unsigned i = 0; i < IRCallArgs.size(); ++i) {
     if (auto *VT = dyn_cast<llvm::VectorType>(IRCallArgs[i]->getType()))
-      LargestVectorWidth = std::max((uint64_t)LargestVectorWidth,
-                                   VT->getPrimitiveSizeInBits().getFixedSize());
+      LargestVectorWidth =
+          std::max((uint64_t)LargestVectorWidth,
+                   VT->getPrimitiveSizeInBits().getKnownMinSize());
   }
 
   // Compute the calling convention and attributes.
@@ -4594,8 +4612,9 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
 
   // Update largest vector width from the return type.
   if (auto *VT = dyn_cast<llvm::VectorType>(CI->getType()))
-    LargestVectorWidth = std::max((uint64_t)LargestVectorWidth,
-                                  VT->getPrimitiveSizeInBits().getFixedSize());
+    LargestVectorWidth =
+        std::max((uint64_t)LargestVectorWidth,
+                 VT->getPrimitiveSizeInBits().getKnownMinSize());
 
   // Insert instrumentation or attach profile metadata at indirect call sites.
   // For more details, see the comment before the definition of
@@ -4786,8 +4805,10 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
   for (CallLifetimeEnd &LifetimeEnd : CallLifetimeEndAfterCall)
     LifetimeEnd.Emit(*this, /*Flags=*/{});
 
-  for (auto &LT : CallArgs.getLifetimeCleanups())
-    EmitLifetimeEnd(LT.Size, LT.Addr);
+  if (!ReturnValue.isExternallyDestructed() &&
+      RetTy.isDestructedType() == QualType::DK_nontrivial_c_struct)
+    pushDestroy(QualType::DK_nontrivial_c_struct, Ret.getAggregateAddress(),
+                RetTy);
 
   return Ret;
 }

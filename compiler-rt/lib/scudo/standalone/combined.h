@@ -32,6 +32,8 @@ extern "C" inline void EmptyCallback() {}
 
 namespace scudo {
 
+enum class Option { ReleaseInterval };
+
 template <class Params, void (*PostInitCallback)(void) = EmptyCallback>
 class Allocator {
 public:
@@ -258,8 +260,8 @@ public:
     }
     DCHECK_LE(Size, NeededSize);
 
-    void *Block;
-    uptr ClassId;
+    void *Block = nullptr;
+    uptr ClassId = 0;
     uptr SecondaryBlockEnd;
     if (LIKELY(PrimaryT::canAllocate(NeededSize))) {
       ClassId = SizeClassMap::getClassIdBySize(NeededSize);
@@ -267,13 +269,23 @@ public:
       bool UnlockRequired;
       auto *TSD = TSDRegistry.getTSDAndLock(&UnlockRequired);
       Block = TSD->Cache.allocate(ClassId);
+      // If the allocation failed, the most likely reason with a 64-bit primary
+      // is the region being full. In that event, retry once using the
+      // immediately larger class (except if the failing class was already the
+      // largest). This will waste some memory but will allow the application to
+      // not fail. If dealing with the largest class, fallback to the Secondary.
+      if (UNLIKELY(!Block)) {
+        if (ClassId < SizeClassMap::LargestClassId)
+          Block = TSD->Cache.allocate(++ClassId);
+        else
+          ClassId = 0;
+      }
       if (UnlockRequired)
         TSD->unlock();
-    } else {
-      ClassId = 0;
+    }
+    if (UNLIKELY(ClassId == 0))
       Block = Secondary.allocate(NeededSize, Alignment, &SecondaryBlockEnd,
                                  ZeroContents);
-    }
 
     if (UNLIKELY(!Block)) {
       if (Options.MayReturnNull)
@@ -436,6 +448,12 @@ public:
   void *reallocate(void *OldPtr, uptr NewSize, uptr Alignment = MinAlignment) {
     initThreadMaybe();
 
+    if (UNLIKELY(NewSize >= MaxAllowedMallocSize)) {
+      if (Options.MayReturnNull)
+        return nullptr;
+      reportAllocationSizeTooBig(NewSize, 0, MaxAllowedMallocSize);
+    }
+
     void *OldTaggedPtr = OldPtr;
     OldPtr = untagPointerMaybe(OldPtr);
 
@@ -489,9 +507,7 @@ public:
     // reasonable delta), we just keep the old block, and update the chunk
     // header to reflect the size change.
     if (reinterpret_cast<uptr>(OldPtr) + NewSize <= BlockEnd) {
-      const uptr Delta =
-          OldSize < NewSize ? NewSize - OldSize : OldSize - NewSize;
-      if (Delta <= SizeClassMap::MaxSize / 2) {
+      if (NewSize > OldSize || (OldSize - NewSize) < getPageSizeCached()) {
         Chunk::UnpackedHeader NewHeader = OldHeader;
         NewHeader.SizeOrUnusedBytes =
             (ClassId ? NewSize
@@ -613,8 +629,14 @@ public:
     return Options.MayReturnNull;
   }
 
-  // TODO(kostyak): implement this as a "backend" to mallopt.
-  bool setOption(UNUSED uptr Option, UNUSED uptr Value) { return false; }
+  bool setOption(Option O, sptr Value) {
+    if (O == Option::ReleaseInterval) {
+      Primary.setReleaseToOsIntervalMs(static_cast<s32>(Value));
+      Secondary.setReleaseToOsIntervalMs(static_cast<s32>(Value));
+      return true;
+    }
+    return false;
+  }
 
   // Return the usable size for a given chunk. Technically we lie, as we just
   // report the actual size of a chunk. This is done to counteract code actively

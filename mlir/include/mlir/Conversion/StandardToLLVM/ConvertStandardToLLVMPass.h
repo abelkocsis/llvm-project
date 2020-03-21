@@ -58,16 +58,8 @@ void populateStdToLLVMBarePtrConversionPatterns(
 /// Specifying `useAlloca-true` emits stack allocations instead. In the future
 /// this may become an enum when we have concrete uses for other options.
 std::unique_ptr<OpPassBase<ModuleOp>>
-createLowerToLLVMPass(bool useAlloca = false, bool emitCWrappers = false);
-
-namespace LLVM {
-/// Make argument-taking successors of each block distinct.  PHI nodes in LLVM
-/// IR use the predecessor ID to identify which value to take.  They do not
-/// support different values coming from the same predecessor.  If a block has
-/// another block as a successor more than once with different values, insert
-/// a new dummy block for LLVM PHI nodes to tell the sources apart.
-void ensureDistinctSuccessors(ModuleOp m);
-} // namespace LLVM
+createLowerToLLVMPass(bool useAlloca = false, bool useBarePtrCallConv = false,
+                      bool emitCWrappers = false);
 
 } // namespace mlir
 

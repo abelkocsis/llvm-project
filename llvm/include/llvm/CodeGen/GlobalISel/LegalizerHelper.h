@@ -266,11 +266,16 @@ public:
   LegalizeResult lowerSITOFP(MachineInstr &MI, unsigned TypeIdx, LLT Ty);
   LegalizeResult lowerFPTOUI(MachineInstr &MI, unsigned TypeIdx, LLT Ty);
   LegalizeResult lowerFPTOSI(MachineInstr &MI);
+
+  LegalizeResult lowerFPTRUNC_F64_TO_F16(MachineInstr &MI);
+  LegalizeResult lowerFPTRUNC(MachineInstr &MI, unsigned TypeIdx, LLT Ty);
+
   LegalizeResult lowerMinMax(MachineInstr &MI, unsigned TypeIdx, LLT Ty);
   LegalizeResult lowerFCopySign(MachineInstr &MI, unsigned TypeIdx, LLT Ty);
   LegalizeResult lowerFMinNumMaxNum(MachineInstr &MI);
   LegalizeResult lowerFMad(MachineInstr &MI);
   LegalizeResult lowerIntrinsicRound(MachineInstr &MI);
+  LegalizeResult lowerFFloor(MachineInstr &MI);
   LegalizeResult lowerUnmergeValues(MachineInstr &MI);
   LegalizeResult lowerShuffleVector(MachineInstr &MI);
   LegalizeResult lowerDynStackAlloc(MachineInstr &MI);

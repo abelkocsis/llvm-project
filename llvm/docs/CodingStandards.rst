@@ -92,6 +92,10 @@ We explicitly avoid some standard facilities, like the I/O streams, and instead
 use LLVM's streams library (raw_ostream_). More detailed information on these
 subjects is available in the :doc:`ProgrammersManual`.
 
+For more information about LLVM's data structures and the tradeoffs they make,
+please consult [that section of the programmer's
+manual](https://llvm.org/docs/ProgrammersManual.html#picking-the-right-data-structure-for-a-task).
+
 Guidelines for Go code
 ----------------------
 
@@ -757,6 +761,49 @@ your private interface remains private and undisturbed by outsiders.
 
     It's okay to put extra implementation methods in a public class itself. Just
     make them private (or protected) and all is well.
+
+Use Namespace Qualifiers to Implement Previously Declared Functions
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+When providing an out of line implementation of a function in a source file, do
+not open namespace blocks in the source file. Instead, use namespace qualifiers
+to help ensure that your definition matches an existing declaration. Do this:
+
+.. code-block:: c++
+
+  // Foo.h
+  namespace llvm {
+  int foo(const char *s);
+  }
+
+  // Foo.cpp
+  #include "Foo.h"
+  using namespace llvm;
+  int llvm::foo(const char *s) {
+    // ...
+  }
+
+Doing this helps to avoid bugs where the definition does not match the
+declaration from the header. For example, the following C++ code defines a new
+overload of ``llvm::foo`` instead of providing a definition for the existing
+function declared in the header:
+
+.. code-block:: c++
+
+  // Foo.cpp
+  #include "Foo.h"
+  namespace llvm {
+  int foo(char *s) { // Mismatch between "const char *" and "char *"
+  }
+  } // end namespace llvm
+
+This error will not be caught until the build is nearly complete, when the
+linker fails to find a definition for any uses of the original function.  If the
+function were instead defined with a namespace qualifier, the error would have
+been caught immediately when the definition was compiled.
+
+Class method implementations must already name the class and new overloads
+cannot be introduced out of line, so this recommendation does not apply to them.
 
 .. _early exits:
 

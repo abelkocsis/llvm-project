@@ -335,7 +335,7 @@ void darwin::Linker::AddLinkArgs(Compilation &C, const ArgList &Args,
   Args.AddAllArgs(CmdArgs, options::OPT_init);
 
   // Add the deployment target.
-  if (!Version[0] || Version[0] >= 520)
+  if (Version[0] >= 520)
     MachOTC.addPlatformVersionArgs(Args, CmdArgs);
   else
     MachOTC.addMinVersionArgs(Args, CmdArgs);
@@ -1068,8 +1068,8 @@ StringRef Darwin::getPlatformFamily() const {
 
 StringRef Darwin::getSDKName(StringRef isysroot) {
   // Assume SDK has path: SOME_PATH/SDKs/PlatformXX.YY.sdk
-  auto BeginSDK = llvm::sys::path::begin(isysroot);
-  auto EndSDK = llvm::sys::path::end(isysroot);
+  auto BeginSDK = llvm::sys::path::rbegin(isysroot);
+  auto EndSDK = llvm::sys::path::rend(isysroot);
   for (auto IT = BeginSDK; IT != EndSDK; ++IT) {
     StringRef SDK = *IT;
     if (SDK.endswith(".sdk"))
@@ -1899,7 +1899,7 @@ void DarwinClang::AddClangSystemIncludeArgs(const llvm::opt::ArgList &DriverArgs
     CIncludeDirs.split(dirs, ":");
     for (llvm::StringRef dir : dirs) {
       llvm::StringRef Prefix =
-          llvm::sys::path::is_absolute(dir) ? llvm::StringRef(Sysroot) : "";
+          llvm::sys::path::is_absolute(dir) ? "" : llvm::StringRef(Sysroot);
       addExternCSystemInclude(DriverArgs, CC1Args, Prefix + dir);
     }
   } else {

@@ -30,6 +30,7 @@
 #include "llvm/CodeGen/GlobalISel/IRTranslator.h"
 #include "llvm/CodeGen/GlobalISel/InstructionSelect.h"
 #include "llvm/CodeGen/GlobalISel/Legalizer.h"
+#include "llvm/CodeGen/GlobalISel/Localizer.h"
 #include "llvm/CodeGen/GlobalISel/RegBankSelect.h"
 #include "llvm/CodeGen/MIRParser/MIParser.h"
 #include "llvm/CodeGen/Passes.h"
@@ -138,6 +139,13 @@ static cl::opt<bool, true> EnableAMDGPUFunctionCallsOpt(
   cl::init(true),
   cl::Hidden);
 
+static cl::opt<bool, true> EnableAMDGPUFixedFunctionABIOpt(
+  "amdgpu-fixed-function-abi",
+  cl::desc("Enable all implicit function arguments"),
+  cl::location(AMDGPUTargetMachine::EnableFixedFunctionABI),
+  cl::init(false),
+  cl::Hidden);
+
 // Enable lib calls simplifications
 static cl::opt<bool> EnableLibCallSimplify(
   "amdgpu-simplify-libcall",
@@ -217,6 +225,7 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeAMDGPUTarget() {
   initializeAMDGPULowerKernelAttributesPass(*PR);
   initializeAMDGPULowerIntrinsicsPass(*PR);
   initializeAMDGPUOpenCLEnqueuedBlockLoweringPass(*PR);
+  initializeAMDGPUPostLegalizerCombinerPass(*PR);
   initializeAMDGPUPreLegalizerCombinerPass(*PR);
   initializeAMDGPUPromoteAllocaPass(*PR);
   initializeAMDGPUCodeGenPreparePass(*PR);
@@ -245,6 +254,7 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeAMDGPUTarget() {
   initializeAMDGPUPrintfRuntimeBindingPass(*PR);
   initializeGCNRegBankReassignPass(*PR);
   initializeGCNNSAReassignPass(*PR);
+  initializeSIAddIMGInitPass(*PR);
 }
 
 static std::unique_ptr<TargetLoweringObjectFile> createTLOF(const Triple &TT) {
@@ -369,6 +379,7 @@ AMDGPUTargetMachine::AMDGPUTargetMachine(const Target &T, const Triple &TT,
 
 bool AMDGPUTargetMachine::EnableLateStructurizeCFG = false;
 bool AMDGPUTargetMachine::EnableFunctionCalls = false;
+bool AMDGPUTargetMachine::EnableFixedFunctionABI = false;
 
 AMDGPUTargetMachine::~AMDGPUTargetMachine() = default;
 
@@ -621,6 +632,7 @@ public:
   bool addIRTranslator() override;
   void addPreLegalizeMachineIR() override;
   bool addLegalizeMachineIR() override;
+  void addPreRegBankSelect() override;
   bool addRegBankSelect() override;
   bool addGlobalInstructionSelect() override;
   void addFastRegAlloc() override;
@@ -901,11 +913,17 @@ bool GCNPassConfig::addIRTranslator() {
 void GCNPassConfig::addPreLegalizeMachineIR() {
   bool IsOptNone = getOptLevel() == CodeGenOpt::None;
   addPass(createAMDGPUPreLegalizeCombiner(IsOptNone));
+  addPass(new Localizer());
 }
 
 bool GCNPassConfig::addLegalizeMachineIR() {
   addPass(new Legalizer());
   return false;
+}
+
+void GCNPassConfig::addPreRegBankSelect() {
+  bool IsOptNone = getOptLevel() == CodeGenOpt::None;
+  addPass(createAMDGPUPostLegalizeCombiner(IsOptNone));
 }
 
 bool GCNPassConfig::addRegBankSelect() {
@@ -1033,11 +1051,14 @@ bool GCNTargetMachine::parseMachineFunctionInfo(
 
   MFI->initializeBaseYamlFields(YamlMFI);
 
-  auto parseRegister = [&](const yaml::StringValue &RegName, unsigned &RegVal) {
-    if (parseNamedRegisterReference(PFS, RegVal, RegName.Value, Error)) {
+  auto parseRegister = [&](const yaml::StringValue &RegName, Register &RegVal) {
+    // FIXME: Update parseNamedRegsiterReference to take a Register.
+    unsigned TempReg;
+    if (parseNamedRegisterReference(PFS, TempReg, RegName.Value, Error)) {
       SourceRange = RegName.SourceRange;
       return true;
     }
+    RegVal = TempReg;
 
     return false;
   };
@@ -1055,7 +1076,6 @@ bool GCNTargetMachine::parseMachineFunctionInfo(
   };
 
   if (parseRegister(YamlMFI.ScratchRSrcReg, MFI->ScratchRSrcReg) ||
-      parseRegister(YamlMFI.ScratchWaveOffsetReg, MFI->ScratchWaveOffsetReg) ||
       parseRegister(YamlMFI.FrameOffsetReg, MFI->FrameOffsetReg) ||
       parseRegister(YamlMFI.StackPtrOffsetReg, MFI->StackPtrOffsetReg))
     return true;
@@ -1063,11 +1083,6 @@ bool GCNTargetMachine::parseMachineFunctionInfo(
   if (MFI->ScratchRSrcReg != AMDGPU::PRIVATE_RSRC_REG &&
       !AMDGPU::SGPR_128RegClass.contains(MFI->ScratchRSrcReg)) {
     return diagnoseRegisterClass(YamlMFI.ScratchRSrcReg);
-  }
-
-  if (MFI->ScratchWaveOffsetReg != AMDGPU::SCRATCH_WAVE_OFFSET_REG &&
-      !AMDGPU::SGPR_32RegClass.contains(MFI->ScratchWaveOffsetReg)) {
-    return diagnoseRegisterClass(YamlMFI.ScratchWaveOffsetReg);
   }
 
   if (MFI->FrameOffsetReg != AMDGPU::FP_REG &&

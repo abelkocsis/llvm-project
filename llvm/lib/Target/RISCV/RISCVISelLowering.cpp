@@ -336,6 +336,17 @@ bool RISCVTargetLowering::isSExtCheaperThanZExt(EVT SrcVT, EVT DstVT) const {
   return Subtarget.is64Bit() && SrcVT == MVT::i32 && DstVT == MVT::i64;
 }
 
+bool RISCVTargetLowering::isFPImmLegal(const APFloat &Imm, EVT VT,
+                                       bool ForCodeSize) const {
+  if (VT == MVT::f32 && !Subtarget.hasStdExtF())
+    return false;
+  if (VT == MVT::f64 && !Subtarget.hasStdExtD())
+    return false;
+  if (Imm.isNegZero())
+    return false;
+  return Imm.isZero();
+}
+
 bool RISCVTargetLowering::hasBitPreservingFPLogic(EVT VT) const {
   return (VT == MVT::f32 && Subtarget.hasStdExtF()) ||
          (VT == MVT::f64 && Subtarget.hasStdExtD());
@@ -2492,6 +2503,10 @@ void RISCVTargetLowering::validateCCReservedRegs(
       }))
     F.getContext().diagnose(DiagnosticInfoUnsupported{
         F, "Argument register required, but has been reserved."});
+}
+
+bool RISCVTargetLowering::mayBeEmittedAsTailCall(const CallInst *CI) const {
+  return CI->isTailCall();
 }
 
 const char *RISCVTargetLowering::getTargetNodeName(unsigned Opcode) const {

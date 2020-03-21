@@ -12,7 +12,7 @@
 
 #include "mlir/Analysis/Passes.h"
 #include "mlir/Analysis/Utils.h"
-#include "mlir/Dialect/AffineOps/AffineOps.h"
+#include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/Pass/Pass.h"
 
@@ -27,9 +27,6 @@ struct TestParallelismDetection
 
 } // end anonymous namespace
 
-std::unique_ptr<OpPassBase<FuncOp>> mlir::createParallelismDetectionTestPass() {
-  return std::make_unique<TestParallelismDetection>();
-}
 
 // Walks the function and emits a note for all 'affine.for' ops detected as
 // parallel.
@@ -44,5 +41,9 @@ void TestParallelismDetection::runOnFunction() {
   });
 }
 
-static PassRegistration<TestParallelismDetection>
-    pass("test-detect-parallel", "Test parallelism detection ");
+namespace mlir {
+void registerTestParallelismDetection() {
+  PassRegistration<TestParallelismDetection> pass(
+      "test-detect-parallel", "Test parallelism detection ");
+}
+} // namespace mlir
