@@ -10,6 +10,7 @@
 #include "../ClangTidyModule.h"
 #include "../ClangTidyModuleRegistry.h"
 #include "../bugprone/BadSignalToKillThreadCheck.h"
+#include "../bugprone/DoNotReferAtomicTwiceCheck.h"
 #include "../bugprone/ReservedIdentifierCheck.h"
 #include "../bugprone/SpuriouslyWakeUpFunctionsCheck.h"
 #include "../bugprone/UnhandledSelfAssignmentCheck.h"
@@ -85,6 +86,8 @@ public:
 
     // C checkers
     // CON
+    CheckFactories.registerCheck<bugprone::DoNotReferAtomicTwiceCheck>(
+        "cert-con40-c");
     CheckFactories.registerCheck<bugprone::SpuriouslyWakeUpFunctionsCheck>(
         "cert-con36-c");
     // DCL

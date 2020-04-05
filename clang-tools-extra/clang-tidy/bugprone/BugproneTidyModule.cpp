@@ -17,6 +17,7 @@
 #include "BranchCloneCheck.h"
 #include "CopyConstructorInitCheck.h"
 #include "DanglingHandleCheck.h"
+#include "DoNotReferAtomicTwiceCheck.h"
 #include "DynamicStaticInitializersCheck.h"
 #include "ExceptionEscapeCheck.h"
 #include "FoldInitTypeCheck.h"
@@ -84,6 +85,8 @@ public:
         "bugprone-copy-constructor-init");
     CheckFactories.registerCheck<DanglingHandleCheck>(
         "bugprone-dangling-handle");
+    CheckFactories.registerCheck<DoNotReferAtomicTwiceCheck>(
+        "bugprone-do-not-refer-atomic-twice");
     CheckFactories.registerCheck<DynamicStaticInitializersCheck>(
         "bugprone-dynamic-static-initializers");
     CheckFactories.registerCheck<ExceptionEscapeCheck>(
