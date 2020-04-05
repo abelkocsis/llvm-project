@@ -31,22 +31,22 @@ void SignalInMultithreadedProgramCheck::storeOptions(
 }
 
 void SignalInMultithreadedProgramCheck::registerMatchers(MatchFinder *Finder) {
-  auto signalCall =
+  auto threadCall = anyOf(
+      hasDescendant(
+          callExpr(ignoringImpCasts(hasDescendant(declRefExpr(hasDeclaration(
+                       functionDecl(hasAnyListedName(ThreadList)))))))
+              .bind("thread")),
+      hasDescendant(varDecl(hasType(recordDecl(hasName("std::thread")))))
+
+  );
+  Finder->addMatcher(
       callExpr(
           ignoringImpCasts(hasDescendant(declRefExpr(hasDeclaration(
               functionDecl(allOf(hasName("signal"), parameterCountIs(2),
-                                 hasParameter(0, hasType(isInteger())))))))))
-          .bind("signal");
-
-  auto threadCall =
-      anyOf(hasDescendant(callExpr(ignoringImpCasts(hasDescendant(declRefExpr(
-                hasDeclaration(functionDecl(hasAnyListedName(ThreadList)))))))),
-            hasDescendant(varDecl(hasType(recordDecl(hasName("std::thread")))))
-
-      );
-
-  Finder->addMatcher(
-      translationUnitDecl(allOf(hasDescendant(signalCall), threadCall)), this);
+                                 hasParameter(0, hasType(isInteger())))))))),
+          hasAncestor(compoundStmt(threadCall)))
+          .bind("signal"),
+      this);
 }
 
 void SignalInMultithreadedProgramCheck::check(
