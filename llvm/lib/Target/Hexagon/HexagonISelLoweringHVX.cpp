@@ -304,7 +304,15 @@ HexagonTargetLowering::allowsHvxMemoryAccess(MVT VecTy, unsigned Alignment,
         MachineMemOperand::Flags Flags, bool *Fast) const {
   // Bool vectors are excluded by default, but make it explicit to
   // emphasize that bool vectors cannot be loaded or stored.
-  return Subtarget.isHVXVectorType(VecTy, /*IncludeBool=*/false);
+  // Also, disallow double vector stores (to prevent unnecessary
+  // store widening in DAG combiner).
+  if (VecTy.getSizeInBits() > 8*Subtarget.getVectorLength())
+    return false;
+  if (!Subtarget.isHVXVectorType(VecTy, /*IncludeBool=*/false))
+    return false;
+  if (Fast)
+    *Fast = true;
+  return true;
 }
 
 bool
@@ -1079,7 +1087,7 @@ HexagonTargetLowering::compressHvxPred(SDValue VecQ, const SDLoc &dl,
   // These are bytes with the LSB rotated left with respect to their index.
   for (unsigned i = 0; i != HwLen/8; ++i) {
     for (unsigned j = 0; j != 8; ++j)
-      Tmp.push_back(ConstantInt::get(Int8Ty, 1u << j));
+      Tmp.push_back(ConstantInt::get(Int8Ty, 1ull << j));
   }
   Constant *CV = ConstantVector::get(Tmp);
   unsigned Align = HwLen;
@@ -1561,14 +1569,7 @@ HexagonTargetLowering::LowerHvxBitcast(SDValue Op, SelectionDAG &DAG) const {
     if (BitWidth == 64)
       return Combines[0];
 
-    // It must be i128. I128 is not a legal type, so this part will be
-    // executed during type legalization. We need to generate code that
-    // the default expansion can break up into smaller pieces.
-    SDValue C0 = DAG.getZExtOrTrunc(Combines[0], dl, ResTy);
-    SDValue C1 = DAG.getNode(ISD::SHL, dl, ResTy,
-        DAG.getZExtOrTrunc(Combines[1], dl, ResTy),
-        DAG.getConstant(64, dl, MVT::i32));
-    return DAG.getNode(ISD::OR, dl, ResTy, C0, C1);
+    return DAG.getNode(ISD::BUILD_PAIR, dl, ResTy, Combines);
   }
 
   return Op;

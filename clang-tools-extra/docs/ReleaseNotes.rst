@@ -67,8 +67,18 @@ The improvements are...
 Improvements to clang-tidy
 --------------------------
 
+New module
+^^^^^^^^^^
+- New module `llvmlibc`.
+
+  This module contains checks related to the LLVM-libc coding standards.
+
 New checks
 ^^^^^^^^^^
+- New :doc:`cppcoreguidelines-avoid-non-const-global-variables
+  <clang-tidy/checks/cppcoreguidelines-avoid-non-const-global-variables>` check.
+  Finds non-const global variables as described in check I.2 of C++ Core
+  Guidelines.
 
 - New :doc:`bugprone-misplaced-pointer-arithmetic-in-alloc
   <clang-tidy/checks/bugprone-misplaced-pointer-arithmetic-in-alloc>` check.
@@ -76,6 +86,14 @@ New checks
   Finds cases where an integer expression is added to or subtracted from the
   result of a memory allocation function (``malloc()``, ``calloc()``,
   ``realloc()``, ``alloca()``) instead of its argument.
+
+- New :doc:`bugprone-spuriously-wake-up-functions
+  <clang-tidy/checks/bugprone-spuriously-wake-up-functions>` check.
+
+  Finds ``cnd_wait``, ``cnd_timedwait``, ``wait``, ``wait_for``, or
+  ``wait_until`` function calls when the function is not invoked from a loop
+  that checks whether a condition predicate holds or the function has a 
+  condition parameter.
 
 - New :doc:`bugprone-reserved-identifier
   <clang-tidy/checks/bugprone-reserved-identifier>` check.
@@ -90,11 +108,24 @@ New checks
   of the following: ``thrd_create``, ``std::thread``, ``boost::thread``,
   ``pthread_t``.
 
+- New :doc:`bugprone-suspicious-include
+  <clang-tidy/checks/bugprone-suspicious-include>` check.
+
+  Finds cases where an include refers to what appears to be an implementation
+  file, which often leads to hard-to-track-down ODR violations, and diagnoses
+  them.
+
 - New :doc:`cert-oop57-cpp
   <clang-tidy/checks/cert-oop57-cpp>` check.
 
   Flags use of the `C` standard library functions ``memset``, ``memcpy`` and
   ``memcmp`` and similar derivatives on non-trivial types.
+
+- New :doc:`llvmlibc-restrict-system-libc-headers
+  <clang-tidy/checks/llvmlibc-restrict-system-libc-headers>` check.
+
+  Finds includes of system libc headers not provided by the compiler within
+  llvm-libc implementations.
 
 - New :doc:`objc-dealloc-in-category
   <clang-tidy/checks/objc-dealloc-in-category>` check.
@@ -109,10 +140,20 @@ New checks
 New check aliases
 ^^^^^^^^^^^^^^^^^
 
+- New alias :doc:`cert-con36-c
+  <clang-tidy/checks/cert-con36-c>` to
+  :doc:`bugprone-spuriously-wake-up-functions
+  <clang-tidy/checks/bugprone-spuriously-wake-up-functions>` was added.
+
 - New alias :doc:`cert-con37-c
   <clang-tidy/checks/cert-con37-c>` to
   :doc:`bugprone-signal-in-multithreaded-program
   <clang-tidy/checks/bugprone-signal-in-multithreaded-program>` was added.
+
+- New alias :doc:`cert-con54-cpp
+  <clang-tidy/checks/cert-con54-cpp>` to
+  :doc:`bugprone-spuriously-wake-up-functions
+  <clang-tidy/checks/bugprone-spuriously-wake-up-functions>` was added.
 
 - New alias :doc:`cert-dcl37-c
   <clang-tidy/checks/cert-dcl37-c>` to
@@ -138,8 +179,16 @@ Changes in existing checks
   check now detects in class initializers and constructor initializers which
   are deemed to be redundant.
 
+- Checks supporting the ``HeaderFileExtensions`` flag now support ``;`` as a
+  delimiter in addition to ``,``, with the latter being deprecated as of this
+  release. This simplifies how one specifies the options on the command line:
+  ``--config="{CheckOptions: [{ key: HeaderFileExtensions, value: h;;hpp;hxx }]}"``
+
 Renamed checks
 ^^^^^^^^^^^^^^
+
+- The 'fuchsia-restrict-system-headers' check was renamed to :doc:`portability-restrict-system-includes
+  <clang-tidy/checks/portability-restrict-system-includes>`
 
 Improvements to include-fixer
 -----------------------------

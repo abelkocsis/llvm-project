@@ -61,6 +61,7 @@ class DWARFContext : public DIContext {
   std::unique_ptr<DWARFDebugLine> Line;
   std::unique_ptr<DWARFDebugFrame> DebugFrame;
   std::unique_ptr<DWARFDebugFrame> EHFrame;
+  std::unique_ptr<DWARFDebugMacro> Macro;
   std::unique_ptr<DWARFDebugMacro> Macinfo;
   std::unique_ptr<DWARFDebugNames> Names;
   std::unique_ptr<AppleAcceleratorTable> AppleNames;
@@ -104,9 +105,22 @@ class DWARFContext : public DIContext {
 
   std::unique_ptr<const DWARFObject> DObj;
 
+  /// Helper enum to distinguish between macro[.dwo] and macinfo[.dwo]
+  /// section.
+  enum MacroSecType {
+    MacinfoSection,
+    MacinfoDwoSection,
+    MacroSection
+    // FIXME: Add support for.debug_macro.dwo section.
+  };
+
 public:
   DWARFContext(std::unique_ptr<const DWARFObject> DObj,
-               std::string DWPName = "");
+               std::string DWPName = "",
+               std::function<void(Error)> RecoverableErrorHandler =
+                   WithColor::defaultErrorHandler,
+               std::function<void(Error)> WarningHandler =
+                   WithColor::defaultWarningHandler);
   ~DWARFContext();
 
   DWARFContext(DWARFContext &) = delete;
@@ -268,11 +282,14 @@ public:
   /// Get a pointer to the parsed eh frame information object.
   const DWARFDebugFrame *getEHFrame();
 
-  /// Get a pointer to the parsed DebugMacro object.
+  /// Get a pointer to the parsed DebugMacinfo information object.
   const DWARFDebugMacro *getDebugMacinfo();
 
-  /// Get a pointer to the parsed dwo DebugMacro object.
+  /// Get a pointer to the parsed DebugMacinfoDWO information object.
   const DWARFDebugMacro *getDebugMacinfoDWO();
+
+  /// Get a pointer to the parsed DebugMacro information object.
+  const DWARFDebugMacro *getDebugMacro();
 
   /// Get a reference to the parsed accelerator table object.
   const DWARFDebugNames &getDebugNames();
@@ -350,12 +367,19 @@ public:
 
   static std::unique_ptr<DWARFContext>
   create(const object::ObjectFile &Obj, const LoadedObjectInfo *L = nullptr,
-         function_ref<void(Error)> HandleError = WithColor::defaultErrorHandler,
-         std::string DWPName = "");
+         std::string DWPName = "",
+         std::function<void(Error)> RecoverableErrorHandler =
+             WithColor::defaultErrorHandler,
+         std::function<void(Error)> WarningHandler =
+             WithColor::defaultWarningHandler);
 
   static std::unique_ptr<DWARFContext>
   create(const StringMap<std::unique_ptr<MemoryBuffer>> &Sections,
-         uint8_t AddrSize, bool isLittleEndian = sys::IsLittleEndianHost);
+         uint8_t AddrSize, bool isLittleEndian = sys::IsLittleEndianHost,
+         std::function<void(Error)> RecoverableErrorHandler =
+             WithColor::defaultErrorHandler,
+         std::function<void(Error)> WarningHandler =
+             WithColor::defaultWarningHandler);
 
   /// Loads register info for the architecture of the provided object file.
   /// Improves readability of dumped DWARF expressions. Requires the caller to
@@ -371,6 +395,10 @@ public:
   }
 
 private:
+  /// Parse a macro[.dwo] or macinfo[.dwo] section.
+  std::unique_ptr<DWARFDebugMacro>
+  parseMacroOrMacinfo(MacroSecType SectionType);
+
   /// Return the compile unit which contains instruction with provided
   /// address.
   /// TODO: change input parameter from "uint64_t Address"
