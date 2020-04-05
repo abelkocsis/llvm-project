@@ -134,7 +134,6 @@ Clang-Tidy Checks
    `clang-analyzer-valist.Uninitialized <clang-analyzer-valist.Uninitialized.html>`_,
    `clang-analyzer-valist.Unterminated <clang-analyzer-valist.Unterminated.html>`_,
    `cppcoreguidelines-avoid-goto <cppcoreguidelines-avoid-goto.html>`_,
-   `cppcoreguidelines-avoid-non-const-global-variables <cppcoreguidelines-avoid-non-const-global-variables.html>`_,
    `cppcoreguidelines-init-variables <cppcoreguidelines-init-variables.html>`_, "Yes"
    `cppcoreguidelines-interfaces-global-init <cppcoreguidelines-interfaces-global-init.html>`_,
    `cppcoreguidelines-macro-usage <cppcoreguidelines-macro-usage.html>`_,
@@ -191,7 +190,7 @@ Clang-Tidy Checks
    `llvm-prefer-isa-or-dyn-cast-in-conditionals <llvm-prefer-isa-or-dyn-cast-in-conditionals.html>`_, "Yes"
    `llvm-prefer-register-over-unsigned <llvm-prefer-register-over-unsigned.html>`_, "Yes"
    `llvm-twine-local <llvm-twine-local.html>`_, "Yes"
-   `llvmlibc-restrict-system-libc-headers <llvmlibc-restrict-system-libc-headers.html>`_,
+   `llvmlibc-restrict-system-libc-headers <llvmlibc-restrict-system-libc-headers.html>`_, "Yes"
    `misc-definitions-in-headers <misc-definitions-in-headers.html>`_, "Yes"
    `misc-misplaced-const <misc-misplaced-const.html>`_,
    `misc-new-delete-overloads <misc-new-delete-overloads.html>`_,
@@ -212,7 +211,7 @@ Clang-Tidy Checks
    `modernize-deprecated-headers <modernize-deprecated-headers.html>`_, "Yes"
    `modernize-deprecated-ios-base-aliases <modernize-deprecated-ios-base-aliases.html>`_, "Yes"
    `modernize-loop-convert <modernize-loop-convert.html>`_, "Yes"
-   `modernize-make-shared <modernize-make-shared.html>`_,
+   `modernize-make-shared <modernize-make-shared.html>`_, "Yes"
    `modernize-make-unique <modernize-make-unique.html>`_, "Yes"
    `modernize-pass-by-value <modernize-pass-by-value.html>`_, "Yes"
    `modernize-raw-string-literal <modernize-raw-string-literal.html>`_, "Yes"
@@ -386,6 +385,8 @@ Clang-Tidy Checks
    `clang-analyzer-unix.cstring.NullArg <clang-analyzer-unix.cstring.NullArg.html>`_, `Clang Static Analyzer <https://clang.llvm.org/docs/analyzer/checkers.html>`_,
    `cppcoreguidelines-avoid-c-arrays <cppcoreguidelines-avoid-c-arrays.html>`_, `modernize-avoid-c-arrays <modernize-avoid-c-arrays.html>`_,
    `cppcoreguidelines-avoid-magic-numbers <cppcoreguidelines-avoid-magic-numbers.html>`_, `readability-magic-numbers <readability-magic-numbers.html>`_,
+   `cppcoreguidelines-avoid-non-const-global-variables <cppcoreguidelines-avoid-non-const-global-variables.html>`_, , , ""
+   `cppcoreguidelines-c-copy-assignment-signature <cppcoreguidelines-c-copy-assignment-signature.html>`_, `misc-unconventional-assign-operator <misc-unconventional-assign-operator.html>`_,
    `cppcoreguidelines-c-copy-assignment-signature <cppcoreguidelines-c-copy-assignment-signature.html>`_, `misc-unconventional-assign-operator <misc-unconventional-assign-operator.html>`_,
    `cppcoreguidelines-explicit-virtual-functions <cppcoreguidelines-explicit-virtual-functions.html>`_, `modernize-use-override <modernize-use-override.html>`_, "Yes"
    `cppcoreguidelines-non-private-member-variables-in-classes <cppcoreguidelines-non-private-member-variables-in-classes.html>`_, `misc-non-private-member-variables-in-classes <misc-non-private-member-variables-in-classes.html>`_,

@@ -1,0 +1,354 @@
+diff --git a/clang-tools-extra/clang-tidy/bugprone/BugproneTidyModule.cpp b/clang-tools-extra/clang-tidy/bugprone/BugproneTidyModule.cpp
+index d010c3ce7e5..c9c4a7e417f 100644
+--- a/clang-tools-extra/clang-tidy/bugprone/BugproneTidyModule.cpp
++++ b/clang-tools-extra/clang-tidy/bugprone/BugproneTidyModule.cpp
+@@ -17,6 +17,7 @@
+ #include "BranchCloneCheck.h"
+ #include "CopyConstructorInitCheck.h"
+ #include "DanglingHandleCheck.h"
++#include "DoNotReferAtomicTwiceCheck.h"
+ #include "DynamicStaticInitializersCheck.h"
+ #include "ExceptionEscapeCheck.h"
+ #include "FoldInitTypeCheck.h"
+@@ -84,6 +85,8 @@ public:
+         "bugprone-copy-constructor-init");
+     CheckFactories.registerCheck<DanglingHandleCheck>(
+         "bugprone-dangling-handle");
++    CheckFactories.registerCheck<DoNotReferAtomicTwiceCheck>(
++        "bugprone-do-not-refer-atomic-twice");
+     CheckFactories.registerCheck<DynamicStaticInitializersCheck>(
+         "bugprone-dynamic-static-initializers");
+     CheckFactories.registerCheck<ExceptionEscapeCheck>(
+diff --git a/clang-tools-extra/clang-tidy/bugprone/CMakeLists.txt b/clang-tools-extra/clang-tidy/bugprone/CMakeLists.txt
+index 4aa3b325ce2..ea2297abbe4 100644
+--- a/clang-tools-extra/clang-tidy/bugprone/CMakeLists.txt
++++ b/clang-tools-extra/clang-tidy/bugprone/CMakeLists.txt
+@@ -9,6 +9,7 @@ add_clang_library(clangTidyBugproneModule
+   BugproneTidyModule.cpp
+   CopyConstructorInitCheck.cpp
+   DanglingHandleCheck.cpp
++  DoNotReferAtomicTwiceCheck.cpp
+   DynamicStaticInitializersCheck.cpp
+   ExceptionEscapeCheck.cpp
+   FoldInitTypeCheck.cpp
+diff --git a/clang-tools-extra/clang-tidy/bugprone/DoNotReferAtomicTwiceCheck.cpp b/clang-tools-extra/clang-tidy/bugprone/DoNotReferAtomicTwiceCheck.cpp
+new file mode 100644
+index 00000000000..2a9af7a657d
+--- /dev/null
++++ b/clang-tools-extra/clang-tidy/bugprone/DoNotReferAtomicTwiceCheck.cpp
+@@ -0,0 +1,44 @@
++//===--- DoNotReferAtomicTwiceCheck.cpp - clang-tidy ----------------------===//
++//
++// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
++// See https://llvm.org/LICENSE.txt for license information.
++// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
++//
++//===----------------------------------------------------------------------===//
++
++#include "DoNotReferAtomicTwiceCheck.h"
++#include "clang/AST/ASTContext.h"
++#include "clang/ASTMatchers/ASTMatchFinder.h"
++
++using namespace clang::ast_matchers;
++
++namespace clang {
++namespace tidy {
++namespace bugprone {
++
++void DoNotReferAtomicTwiceCheck::registerMatchers(MatchFinder *Finder) {
++  Finder->addMatcher(
++      declRefExpr(hasType(hasUnqualifiedDesugaredType(atomicType())),
++                  to(varDecl().bind("atomic")),
++                  hasAncestor(binaryOperator(
++                      unless(hasDescendant(atomicExpr())),
++                      hasRHS(hasDescendant(
++                          declRefExpr(to(varDecl(equalsBoundNode("atomic"))))
++                              .bind("rhs"))))),
++                  unless(equalsBoundNode("rhs"))),
++      this);
++}
++
++void DoNotReferAtomicTwiceCheck::check(const MatchFinder::MatchResult &Result) {
++  const auto *MatchedVar = Result.Nodes.getNodeAs<VarDecl>("atomic");
++  const auto *MatchedRef = Result.Nodes.getNodeAs<DeclRefExpr>("rhs");
++  if (!MatchedRef || !MatchedVar)
++    return;
++  diag(MatchedRef->getExprLoc(),
++       "Do not refer to '%0' atomic variable twice in an expression")
++      << MatchedVar->getName();
++}
++
++} // namespace bugprone
++} // namespace tidy
++} // namespace clang
+diff --git a/clang-tools-extra/clang-tidy/bugprone/DoNotReferAtomicTwiceCheck.h b/clang-tools-extra/clang-tidy/bugprone/DoNotReferAtomicTwiceCheck.h
+new file mode 100644
+index 00000000000..6846af53341
+--- /dev/null
++++ b/clang-tools-extra/clang-tidy/bugprone/DoNotReferAtomicTwiceCheck.h
+@@ -0,0 +1,34 @@
++//===--- DoNotReferAtomicTwiceCheck.h - clang-tidy --------------*- C++ -*-===//
++//
++// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
++// See https://llvm.org/LICENSE.txt for license information.
++// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
++//
++//===----------------------------------------------------------------------===//
++
++#ifndef LLVM_CLANG_TOOLS_EXTRA_CLANG_TIDY_BUGPRONE_DONOTREFERATOMICTWICECHECK_H
++#define LLVM_CLANG_TOOLS_EXTRA_CLANG_TIDY_BUGPRONE_DONOTREFERATOMICTWICECHECK_H
++
++#include "../ClangTidyCheck.h"
++
++namespace clang {
++namespace tidy {
++namespace bugprone {
++
++/// Finds atomic variable which is referred twice in an expression.
++///
++/// For the user-facing documentation see:
++/// http://clang.llvm.org/extra/clang-tidy/checks/bugprone-do-not-refer-atomic-twice.html
++class DoNotReferAtomicTwiceCheck : public ClangTidyCheck {
++public:
++  DoNotReferAtomicTwiceCheck(StringRef Name, ClangTidyContext *Context)
++      : ClangTidyCheck(Name, Context) {}
++  void registerMatchers(ast_matchers::MatchFinder *Finder) override;
++  void check(const ast_matchers::MatchFinder::MatchResult &Result) override;
++};
++
++} // namespace bugprone
++} // namespace tidy
++} // namespace clang
++
++#endif // LLVM_CLANG_TOOLS_EXTRA_CLANG_TIDY_BUGPRONE_DONOTREFERATOMICTWICECHECK_H
+diff --git a/clang-tools-extra/clang-tidy/cert/CERTTidyModule.cpp b/clang-tools-extra/clang-tidy/cert/CERTTidyModule.cpp
+index 6459dcf5627..b813d329659 100644
+--- a/clang-tools-extra/clang-tidy/cert/CERTTidyModule.cpp
++++ b/clang-tools-extra/clang-tidy/cert/CERTTidyModule.cpp
+@@ -10,6 +10,7 @@
+ #include "../ClangTidyModule.h"
+ #include "../ClangTidyModuleRegistry.h"
+ #include "../bugprone/BadSignalToKillThreadCheck.h"
++#include "../bugprone/DoNotReferAtomicTwiceCheck.h"
+ #include "../bugprone/ReservedIdentifierCheck.h"
+ #include "../bugprone/SpuriouslyWakeUpFunctionsCheck.h"
+ #include "../bugprone/UnhandledSelfAssignmentCheck.h"
+@@ -87,6 +88,8 @@ public:
+     // CON
+     CheckFactories.registerCheck<bugprone::SpuriouslyWakeUpFunctionsCheck>(
+         "cert-con36-c");
++    CheckFactories.registerCheck<bugprone::DoNotReferAtomicTwiceCheck>(
++        "cert-con40-c");
+     // DCL
+     CheckFactories.registerCheck<misc::StaticAssertCheck>("cert-dcl03-c");
+     CheckFactories.registerCheck<readability::UppercaseLiteralSuffixCheck>(
+diff --git a/clang-tools-extra/docs/ReleaseNotes.rst b/clang-tools-extra/docs/ReleaseNotes.rst
+index 745a1d1035e..3cac95a8a4c 100644
+--- a/clang-tools-extra/docs/ReleaseNotes.rst
++++ b/clang-tools-extra/docs/ReleaseNotes.rst
+@@ -75,6 +75,12 @@ New module
+ 
+ New checks
+ ^^^^^^^^^^
++
++- New :doc:`bugprone-do-not-refer-atomic-twice
++  <clang-tidy/checks/bugprone-do-not-refer-atomic-twice>` check.
++
++  Finds atomic variable which is referred twice in an expression.
++
+ - New :doc:`cppcoreguidelines-avoid-non-const-global-variables
+   <clang-tidy/checks/cppcoreguidelines-avoid-non-const-global-variables>` check.
+   Finds non-const global variables as described in check I.2 of C++ Core
+@@ -137,6 +143,11 @@ New check aliases
+   :doc:`bugprone-spuriously-wake-up-functions
+   <clang-tidy/checks/bugprone-spuriously-wake-up-functions>` was added.
+ 
++- New alias :doc:`cert-con40-c
++  <clang-tidy/checks/cert-con40-c>` to
++  :doc:`bugprone-do-not-refer-atomic-twice
++  <clang-tidy/checks/bugprone-do-not-refer-atomic-twice>` was added.
++
+ - New alias :doc:`cert-con54-cpp
+   <clang-tidy/checks/cert-con54-cpp>` to
+   :doc:`bugprone-spuriously-wake-up-functions
+diff --git a/clang-tools-extra/docs/clang-tidy/checks/bugprone-do-not-refer-atomic-twice.rst b/clang-tools-extra/docs/clang-tidy/checks/bugprone-do-not-refer-atomic-twice.rst
+new file mode 100644
+index 00000000000..d331d878573
+--- /dev/null
++++ b/clang-tools-extra/docs/clang-tidy/checks/bugprone-do-not-refer-atomic-twice.rst
+@@ -0,0 +1,17 @@
++.. title:: clang-tidy - bugprone-do-not-refer-atomic-twice
++
++bugprone-do-not-refer-atomic-twice
++==================================
++
++Finds atomic variable which is referred twice in an expression.
++
++.. code-block:: c
++
++    atomic_int n = ATOMIC_VAR_INIT(0);
++    int compute_sum(void) {
++        return n * (n + 1) / 2;
++    }
++
++This check corresponds to the CERT C Coding Standard rule
++`CON40-C. Do not refer to an atomic variable twice in an expression
++<https://wiki.sei.cmu.edu/confluence/display/c/CON40-C.+Do+not+refer+to+an+atomic+variable+twice+in+an+expression>`_.
+diff --git a/clang-tools-extra/docs/clang-tidy/checks/cert-con40-c.rst b/clang-tools-extra/docs/clang-tidy/checks/cert-con40-c.rst
+new file mode 100644
+index 00000000000..266354ead83
+--- /dev/null
++++ b/clang-tools-extra/docs/clang-tidy/checks/cert-con40-c.rst
+@@ -0,0 +1,10 @@
++.. title:: clang-tidy - cert-con40-c
++.. meta::
++   :http-equiv=refresh: 5;URL=bugprone-do-not-refer-atomic-twice.html
++
++cert-con40-c
++============
++
++The cert-con40-c check is an alias, please see
++`bugprone-do-not-refer-atomic-twice <bugprone-do-not-refer-atomic-twice>`_
++for more information.
+diff --git a/clang-tools-extra/docs/clang-tidy/checks/list.rst b/clang-tools-extra/docs/clang-tidy/checks/list.rst
+index 333a7ea4d5b..c24b245338c 100644
+--- a/clang-tools-extra/docs/clang-tidy/checks/list.rst
++++ b/clang-tools-extra/docs/clang-tidy/checks/list.rst
+@@ -52,6 +52,7 @@ Clang-Tidy Checks
+    `bugprone-branch-clone <bugprone-branch-clone.html>`_,
+    `bugprone-copy-constructor-init <bugprone-copy-constructor-init.html>`_, "Yes"
+    `bugprone-dangling-handle <bugprone-dangling-handle.html>`_,
++   `bugprone-do-not-refer-atomic-twice <bugprone-do-not-refer-atomic-twice.html>`_,
+    `bugprone-dynamic-static-initializers <bugprone-dynamic-static-initializers.html>`_,
+    `bugprone-exception-escape <bugprone-exception-escape.html>`_,
+    `bugprone-fold-init-type <bugprone-fold-init-type.html>`_,
+@@ -97,6 +98,7 @@ Clang-Tidy Checks
+    `bugprone-unused-return-value <bugprone-unused-return-value.html>`_,
+    `bugprone-use-after-move <bugprone-use-after-move.html>`_,
+    `bugprone-virtual-near-miss <bugprone-virtual-near-miss.html>`_, "Yes"
++   `cert-con40-c <cert-con40-c.html>`_,
+    `cert-dcl21-cpp <cert-dcl21-cpp.html>`_,
+    `cert-dcl50-cpp <cert-dcl50-cpp.html>`_,
+    `cert-dcl58-cpp <cert-dcl58-cpp.html>`_,
+@@ -132,6 +134,7 @@ Clang-Tidy Checks
+    `clang-analyzer-valist.Uninitialized <clang-analyzer-valist.Uninitialized.html>`_,
+    `clang-analyzer-valist.Unterminated <clang-analyzer-valist.Unterminated.html>`_,
+    `cppcoreguidelines-avoid-goto <cppcoreguidelines-avoid-goto.html>`_,
++   `cppcoreguidelines-avoid-non-const-global-variables <cppcoreguidelines-avoid-non-const-global-variables.html>`_,
+    `cppcoreguidelines-init-variables <cppcoreguidelines-init-variables.html>`_, "Yes"
+    `cppcoreguidelines-interfaces-global-init <cppcoreguidelines-interfaces-global-init.html>`_,
+    `cppcoreguidelines-macro-usage <cppcoreguidelines-macro-usage.html>`_,
+@@ -188,7 +191,7 @@ Clang-Tidy Checks
+    `llvm-prefer-isa-or-dyn-cast-in-conditionals <llvm-prefer-isa-or-dyn-cast-in-conditionals.html>`_, "Yes"
+    `llvm-prefer-register-over-unsigned <llvm-prefer-register-over-unsigned.html>`_, "Yes"
+    `llvm-twine-local <llvm-twine-local.html>`_, "Yes"
+-   `llvmlibc-restrict-system-libc-headers <llvmlibc-restrict-system-libc-headers.html>`_, "Yes"
++   `llvmlibc-restrict-system-libc-headers <llvmlibc-restrict-system-libc-headers.html>`_,
+    `misc-definitions-in-headers <misc-definitions-in-headers.html>`_, "Yes"
+    `misc-misplaced-const <misc-misplaced-const.html>`_,
+    `misc-new-delete-overloads <misc-new-delete-overloads.html>`_,
+@@ -209,7 +212,7 @@ Clang-Tidy Checks
+    `modernize-deprecated-headers <modernize-deprecated-headers.html>`_, "Yes"
+    `modernize-deprecated-ios-base-aliases <modernize-deprecated-ios-base-aliases.html>`_, "Yes"
+    `modernize-loop-convert <modernize-loop-convert.html>`_, "Yes"
+-   `modernize-make-shared <modernize-make-shared.html>`_, "Yes"
++   `modernize-make-shared <modernize-make-shared.html>`_,
+    `modernize-make-unique <modernize-make-unique.html>`_, "Yes"
+    `modernize-pass-by-value <modernize-pass-by-value.html>`_, "Yes"
+    `modernize-raw-string-literal <modernize-raw-string-literal.html>`_, "Yes"
+@@ -383,7 +386,6 @@ Clang-Tidy Checks
+    `clang-analyzer-unix.cstring.NullArg <clang-analyzer-unix.cstring.NullArg.html>`_, `Clang Static Analyzer <https://clang.llvm.org/docs/analyzer/checkers.html>`_,
+    `cppcoreguidelines-avoid-c-arrays <cppcoreguidelines-avoid-c-arrays.html>`_, `modernize-avoid-c-arrays <modernize-avoid-c-arrays.html>`_,
+    `cppcoreguidelines-avoid-magic-numbers <cppcoreguidelines-avoid-magic-numbers.html>`_, `readability-magic-numbers <readability-magic-numbers.html>`_,
+-   `cppcoreguidelines-avoid-non-const-global-variables <cppcoreguidelines-avoid-non-const-global-variables.html>`_, , , ""
+    `cppcoreguidelines-c-copy-assignment-signature <cppcoreguidelines-c-copy-assignment-signature.html>`_, `misc-unconventional-assign-operator <misc-unconventional-assign-operator.html>`_,
+    `cppcoreguidelines-explicit-virtual-functions <cppcoreguidelines-explicit-virtual-functions.html>`_, `modernize-use-override <modernize-use-override.html>`_, "Yes"
+    `cppcoreguidelines-non-private-member-variables-in-classes <cppcoreguidelines-non-private-member-variables-in-classes.html>`_, `misc-non-private-member-variables-in-classes <misc-non-private-member-variables-in-classes.html>`_,
+@@ -417,4 +419,3 @@ Clang-Tidy Checks
+    `hicpp-use-override <hicpp-use-override.html>`_, `modernize-use-override <modernize-use-override.html>`_, "Yes"
+    `hicpp-vararg <hicpp-vararg.html>`_, `cppcoreguidelines-pro-type-vararg <cppcoreguidelines-pro-type-vararg.html>`_,
+    `llvm-qualified-auto <llvm-qualified-auto.html>`_, `readability-qualified-auto <readability-qualified-auto.html>`_, "Yes"
+-
+diff --git a/clang-tools-extra/test/clang-tidy/checkers/bugprone-do-not-refer-atomic-twice.cpp b/clang-tools-extra/test/clang-tidy/checkers/bugprone-do-not-refer-atomic-twice.cpp
+new file mode 100644
+index 00000000000..ea250a59bf8
+--- /dev/null
++++ b/clang-tools-extra/test/clang-tidy/checkers/bugprone-do-not-refer-atomic-twice.cpp
+@@ -0,0 +1,77 @@
++// RUN: %check_clang_tidy %s bugprone-do-not-refer-atomic-twice %t
++#define _Bool bool
++typedef _Atomic _Bool atomic_bool;
++typedef _Atomic int atomic_int;
++#define ATOMIC_VAR_INIT(VALUE) (VALUE)
++
++atomic_bool b = ATOMIC_VAR_INIT(false);
++atomic_int n = ATOMIC_VAR_INIT(0);
++_Atomic int n2 = ATOMIC_VAR_INIT(0);
++_Atomic(int) n3 = ATOMIC_VAR_INIT(0);
++
++void warn1() {
++  n = (n + 1) / 2;
++  // CHECK-MESSAGES: :[[@LINE-1]]:8: warning: Do not refer to 'n' atomic variable twice in an expression [bugprone-do-not-refer-atomic-twice]
++  n2 = (n2 + 1) / 2;
++  // CHECK-MESSAGES: :[[@LINE-1]]:9: warning: Do not refer to 'n2' atomic variable twice in an expression [bugprone-do-not-refer-atomic-twice]
++  n3 = (n3 + 1) / 2;
++  // CHECK-MESSAGES: :[[@LINE-1]]:9: warning: Do not refer to 'n3' atomic variable twice in an expression [bugprone-do-not-refer-atomic-twice]
++  b = b && true;
++  // CHECK-MESSAGES: :[[@LINE-1]]:7: warning: Do not refer to 'b' atomic variable twice in an expression [bugprone-do-not-refer-atomic-twice]
++}
++
++int warn2_1() {
++  return n * (n + 1) / 2;
++  // CHECK-MESSAGES: :[[@LINE-1]]:15: warning: Do not refer to 'n' atomic variable twice in an expression [bugprone-do-not-refer-atomic-twice]
++}
++
++int warn2_2() {
++  return n2 * (n2 + 1) / 2;
++  // CHECK-MESSAGES: :[[@LINE-1]]:16: warning: Do not refer to 'n2' atomic variable twice in an expression [bugprone-do-not-refer-atomic-twice]
++}
++
++int warn2_3() {
++  return n3 * (n3 + 1) / 2;
++  // CHECK-MESSAGES: :[[@LINE-1]]:16: warning: Do not refer to 'n3' atomic variable twice in an expression [bugprone-do-not-refer-atomic-twice]
++}
++
++int warn2_4() {
++  return (b && true) || b;
++  // CHECK-MESSAGES: :[[@LINE-1]]:25: warning: Do not refer to 'b' atomic variable twice in an expression [bugprone-do-not-refer-atomic-twice]
++}
++
++void good1() {
++  n = 12;
++  n2 = 12;
++  n3 = 12;
++  b = true;
++}
++
++int good2_1() {
++  return n;
++}
++
++int good2_2() {
++  return n2;
++}
++
++int good2_3() {
++  return n3;
++}
++
++bool good2_4() {
++  return b;
++}
++
++void good3() {
++  n += 12;
++  n2 += 12;
++  n3 += 12;
++  b ^= 1;
++}
++
++void good4() {
++  n++;
++  n2++;
++  n3++;
++}
