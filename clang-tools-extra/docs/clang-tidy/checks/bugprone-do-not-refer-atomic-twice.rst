@@ -5,7 +5,7 @@ bugprone-do-not-refer-atomic-twice
 
 Finds atomic variable which is referred twice in an expression.
 
-.. code-block: c
+.. code-block:: c
 
     atomic_int n = ATOMIC_VAR_INIT(0);
     int compute_sum(void) {

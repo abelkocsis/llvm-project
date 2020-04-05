@@ -86,10 +86,10 @@ public:
 
     // C checkers
     // CON
-    CheckFactories.registerCheck<bugprone::DoNotReferAtomicTwiceCheck>(
-        "cert-con40-c");
     CheckFactories.registerCheck<bugprone::SpuriouslyWakeUpFunctionsCheck>(
         "cert-con36-c");
+    CheckFactories.registerCheck<bugprone::DoNotReferAtomicTwiceCheck>(
+        "cert-con40-c");
     // DCL
     CheckFactories.registerCheck<misc::StaticAssertCheck>("cert-dcl03-c");
     CheckFactories.registerCheck<readability::UppercaseLiteralSuffixCheck>(

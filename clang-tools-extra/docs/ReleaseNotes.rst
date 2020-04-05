@@ -75,6 +75,7 @@ New module
 
 New checks
 ^^^^^^^^^^
+
 - New :doc:`bugprone-do-not-refer-atomic-twice
   <clang-tidy/checks/bugprone-do-not-refer-atomic-twice>` check.
 
