@@ -1886,11 +1886,9 @@ define <4 x float> @test_mm_cvtu64_ss(<4 x float> %__A, i64 %__B) {
 ; X86-NEXT:    vmovd {{.*#+}} xmm1 = mem[0],zero,zero,zero
 ; X86-NEXT:    vpinsrd $1, %eax, %xmm1, %xmm1
 ; X86-NEXT:    vmovq %xmm1, {{[0-9]+}}(%esp)
-; X86-NEXT:    xorl %ecx, %ecx
-; X86-NEXT:    testl %eax, %eax
-; X86-NEXT:    setns %cl
+; X86-NEXT:    shrl $31, %eax
 ; X86-NEXT:    fildll {{[0-9]+}}(%esp)
-; X86-NEXT:    fadds {{\.LCPI.*}}(,%ecx,4)
+; X86-NEXT:    fadds {{\.LCPI.*}}(,%eax,4)
 ; X86-NEXT:    fstps {{[0-9]+}}(%esp)
 ; X86-NEXT:    vmovss {{.*#+}} xmm1 = mem[0],zero,zero,zero
 ; X86-NEXT:    vblendps {{.*#+}} xmm0 = xmm1[0],xmm0[1,2,3]
@@ -1907,6 +1905,62 @@ entry:
   %conv.i = uitofp i64 %__B to float
   %vecins.i = insertelement <4 x float> %__A, float %conv.i, i32 0
   ret <4 x float> %vecins.i
+}
+
+define <16 x float> @test_mm512_cvtph_ps(<4 x i64> %__A) {
+; CHECK-LABEL: test_mm512_cvtph_ps:
+; CHECK:       # %bb.0: # %entry
+; CHECK-NEXT:    vcvtph2ps %ymm0, %zmm0
+; CHECK-NEXT:    ret{{[l|q]}}
+entry:
+  %0 = bitcast <4 x i64> %__A to <16 x i16>
+  %1 = bitcast <16 x i16> %0 to <16 x half>
+  %2 = fpext <16 x half> %1 to <16 x float>
+  ret <16 x float> %2
+}
+
+define <16 x float> @test_mm512_mask_cvtph_ps(<16 x float> %__W, i16 zeroext %__U, <4 x i64> %__A) {
+; X86-LABEL: test_mm512_mask_cvtph_ps:
+; X86:       # %bb.0: # %entry
+; X86-NEXT:    movzwl {{[0-9]+}}(%esp), %eax
+; X86-NEXT:    kmovw %eax, %k1
+; X86-NEXT:    vcvtph2ps %ymm1, %zmm0 {%k1}
+; X86-NEXT:    retl
+;
+; X64-LABEL: test_mm512_mask_cvtph_ps:
+; X64:       # %bb.0: # %entry
+; X64-NEXT:    kmovw %edi, %k1
+; X64-NEXT:    vcvtph2ps %ymm1, %zmm0 {%k1}
+; X64-NEXT:    retq
+entry:
+  %0 = bitcast <4 x i64> %__A to <16 x i16>
+  %1 = bitcast <16 x i16> %0 to <16 x half>
+  %2 = bitcast i16 %__U to <16 x i1>
+  %3 = fpext <16 x half> %1 to <16 x float>
+  %4 = select <16 x i1> %2, <16 x float> %3, <16 x float> %__W
+  ret <16 x float> %4
+}
+
+define <16 x float> @test_mm512_maskz_cvtph_ps(i16 zeroext %__U, <4 x i64> %__A) {
+; X86-LABEL: test_mm512_maskz_cvtph_ps:
+; X86:       # %bb.0: # %entry
+; X86-NEXT:    movzwl {{[0-9]+}}(%esp), %eax
+; X86-NEXT:    kmovw %eax, %k1
+; X86-NEXT:    vcvtph2ps %ymm0, %zmm0 {%k1} {z}
+; X86-NEXT:    retl
+;
+; X64-LABEL: test_mm512_maskz_cvtph_ps:
+; X64:       # %bb.0: # %entry
+; X64-NEXT:    kmovw %edi, %k1
+; X64-NEXT:    vcvtph2ps %ymm0, %zmm0 {%k1} {z}
+; X64-NEXT:    retq
+entry:
+  %0 = bitcast <4 x i64> %__A to <16 x i16>
+  %1 = bitcast <16 x i16> %0 to <16 x half>
+  %2 = bitcast i16 %__U to <16 x i1>
+  %3 = fpext <16 x half> %1 to <16 x float>
+  %4 = select <16 x i1> %2, <16 x float> %3, <16 x float> zeroinitializer
+  ret <16 x float> %4
 }
 
 define <8 x double> @test_mm512_cvtps_pd(<8 x float> %__A) {
@@ -8320,7 +8374,7 @@ define float @test_mm512_reduce_max_ps(<16 x float> %__W) {
 ; X86-NEXT:    vmaxps %xmm1, %xmm0, %xmm0
 ; X86-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
 ; X86-NEXT:    vmaxps %xmm1, %xmm0, %xmm0
-; X86-NEXT:    vpermilps {{.*#+}} xmm1 = xmm0[1,0,3,2]
+; X86-NEXT:    vmovshdup {{.*#+}} xmm1 = xmm0[1,1,3,3]
 ; X86-NEXT:    vmaxss %xmm1, %xmm0, %xmm0
 ; X86-NEXT:    vmovss %xmm0, (%esp)
 ; X86-NEXT:    flds (%esp)
@@ -8337,7 +8391,7 @@ define float @test_mm512_reduce_max_ps(<16 x float> %__W) {
 ; X64-NEXT:    vmaxps %xmm1, %xmm0, %xmm0
 ; X64-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
 ; X64-NEXT:    vmaxps %xmm1, %xmm0, %xmm0
-; X64-NEXT:    vpermilps {{.*#+}} xmm1 = xmm0[1,0,3,2]
+; X64-NEXT:    vmovshdup {{.*#+}} xmm1 = xmm0[1,1,3,3]
 ; X64-NEXT:    vmaxss %xmm1, %xmm0, %xmm0
 ; X64-NEXT:    vzeroupper
 ; X64-NEXT:    retq
@@ -8446,7 +8500,7 @@ define float @test_mm512_reduce_min_ps(<16 x float> %__W) {
 ; X86-NEXT:    vminps %xmm1, %xmm0, %xmm0
 ; X86-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
 ; X86-NEXT:    vminps %xmm1, %xmm0, %xmm0
-; X86-NEXT:    vpermilps {{.*#+}} xmm1 = xmm0[1,0,3,2]
+; X86-NEXT:    vmovshdup {{.*#+}} xmm1 = xmm0[1,1,3,3]
 ; X86-NEXT:    vminss %xmm1, %xmm0, %xmm0
 ; X86-NEXT:    vmovss %xmm0, (%esp)
 ; X86-NEXT:    flds (%esp)
@@ -8463,7 +8517,7 @@ define float @test_mm512_reduce_min_ps(<16 x float> %__W) {
 ; X64-NEXT:    vminps %xmm1, %xmm0, %xmm0
 ; X64-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
 ; X64-NEXT:    vminps %xmm1, %xmm0, %xmm0
-; X64-NEXT:    vpermilps {{.*#+}} xmm1 = xmm0[1,0,3,2]
+; X64-NEXT:    vmovshdup {{.*#+}} xmm1 = xmm0[1,1,3,3]
 ; X64-NEXT:    vminss %xmm1, %xmm0, %xmm0
 ; X64-NEXT:    vzeroupper
 ; X64-NEXT:    retq
@@ -8624,7 +8678,7 @@ define float @test_mm512_mask_reduce_max_ps(i16 zeroext %__M, <16 x float> %__W)
 ; X86-NEXT:    vmaxps %xmm1, %xmm0, %xmm0
 ; X86-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
 ; X86-NEXT:    vmaxps %xmm1, %xmm0, %xmm0
-; X86-NEXT:    vpermilps {{.*#+}} xmm1 = xmm0[1,0,3,2]
+; X86-NEXT:    vmovshdup {{.*#+}} xmm1 = xmm0[1,1,3,3]
 ; X86-NEXT:    vmaxss %xmm1, %xmm0, %xmm0
 ; X86-NEXT:    vmovss %xmm0, (%esp)
 ; X86-NEXT:    flds (%esp)
@@ -8644,7 +8698,7 @@ define float @test_mm512_mask_reduce_max_ps(i16 zeroext %__M, <16 x float> %__W)
 ; X64-NEXT:    vmaxps %xmm1, %xmm0, %xmm0
 ; X64-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
 ; X64-NEXT:    vmaxps %xmm1, %xmm0, %xmm0
-; X64-NEXT:    vpermilps {{.*#+}} xmm1 = xmm0[1,0,3,2]
+; X64-NEXT:    vmovshdup {{.*#+}} xmm1 = xmm0[1,1,3,3]
 ; X64-NEXT:    vmaxss %xmm1, %xmm0, %xmm0
 ; X64-NEXT:    vzeroupper
 ; X64-NEXT:    retq
@@ -8809,7 +8863,7 @@ define float @test_mm512_mask_reduce_min_ps(i16 zeroext %__M, <16 x float> %__W)
 ; X86-NEXT:    vminps %xmm1, %xmm0, %xmm0
 ; X86-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
 ; X86-NEXT:    vminps %xmm1, %xmm0, %xmm0
-; X86-NEXT:    vpermilps {{.*#+}} xmm1 = xmm0[1,0,3,2]
+; X86-NEXT:    vmovshdup {{.*#+}} xmm1 = xmm0[1,1,3,3]
 ; X86-NEXT:    vminss %xmm1, %xmm0, %xmm0
 ; X86-NEXT:    vmovss %xmm0, (%esp)
 ; X86-NEXT:    flds (%esp)
@@ -8829,7 +8883,7 @@ define float @test_mm512_mask_reduce_min_ps(i16 zeroext %__M, <16 x float> %__W)
 ; X64-NEXT:    vminps %xmm1, %xmm0, %xmm0
 ; X64-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
 ; X64-NEXT:    vminps %xmm1, %xmm0, %xmm0
-; X64-NEXT:    vpermilps {{.*#+}} xmm1 = xmm0[1,0,3,2]
+; X64-NEXT:    vmovshdup {{.*#+}} xmm1 = xmm0[1,1,3,3]
 ; X64-NEXT:    vminss %xmm1, %xmm0, %xmm0
 ; X64-NEXT:    vzeroupper
 ; X64-NEXT:    retq

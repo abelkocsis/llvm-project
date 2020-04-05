@@ -15,9 +15,6 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/BinaryFormat/Magic.h"
-#include "llvm/DebugInfo/CodeView/TypeRecord.h"
-#include "llvm/DebugInfo/DWARF/DWARFContext.h"
-#include "llvm/LTO/LTO.h"
 #include "llvm/Object/Archive.h"
 #include "llvm/Object/COFF.h"
 #include "llvm/Support/StringSaver.h"
@@ -26,12 +23,18 @@
 #include <vector>
 
 namespace llvm {
+struct DILineInfo;
 namespace pdb {
 class DbiModuleDescriptorBuilder;
+}
+namespace lto {
+class InputFile;
 }
 }
 
 namespace lld {
+class DWARFCache;
+
 namespace coff {
 
 std::vector<MemoryBufferRef> getArchiveMembers(llvm::object::Archive *file);
@@ -200,11 +203,14 @@ public:
   // If the OBJ has a .debug$T stream, this tells how it will be handled.
   TpiSource *debugTypesObj = nullptr;
 
-  // The .debug$T stream if there's one.
-  llvm::Optional<llvm::codeview::CVTypeArray> debugTypes;
+  // The .debug$P or .debug$T section data if present. Empty otherwise.
+  ArrayRef<uint8_t> debugTypes;
 
   llvm::Optional<std::pair<StringRef, uint32_t>>
   getVariableLocation(StringRef var);
+
+  llvm::Optional<llvm::DILineInfo> getDILineInfo(uint32_t offset,
+                                                 uint32_t sectionIndex);
 
 private:
   const coff_section* getSection(uint32_t i);
@@ -216,7 +222,6 @@ private:
   void initializeSymbols();
   void initializeFlags();
   void initializeDependencies();
-  void initializeDwarf();
 
   SectionChunk *
   readSection(uint32_t sectionNumber,
@@ -291,14 +296,7 @@ private:
   // symbols in the real symbol table) are filled with null pointers.
   std::vector<Symbol *> symbols;
 
-  std::unique_ptr<llvm::DWARFContext> dwarf;
-  std::vector<const llvm::DWARFDebugLine::LineTable *> lineTables;
-  struct VarLoc {
-    const llvm::DWARFDebugLine::LineTable *lt;
-    unsigned file;
-    unsigned line;
-  };
-  llvm::DenseMap<StringRef, VarLoc> variableLoc;
+  DWARFCache *dwarf = nullptr;
 };
 
 // This type represents import library members that contain DLL names
@@ -340,11 +338,11 @@ public:
 class BitcodeFile : public InputFile {
 public:
   BitcodeFile(MemoryBufferRef mb, StringRef archiveName,
-              uint64_t offsetInArchive)
-      : BitcodeFile(mb, archiveName, offsetInArchive, {}) {}
+              uint64_t offsetInArchive);
   explicit BitcodeFile(MemoryBufferRef m, StringRef archiveName,
                        uint64_t offsetInArchive,
                        std::vector<Symbol *> &&symbols);
+  ~BitcodeFile();
   static bool classof(const InputFile *f) { return f->kind() == BitcodeKind; }
   ArrayRef<Symbol *> getSymbols() { return symbols; }
   MachineTypes getMachineType() override;

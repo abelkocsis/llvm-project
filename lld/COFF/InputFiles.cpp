@@ -13,6 +13,7 @@
 #include "Driver.h"
 #include "SymbolTable.h"
 #include "Symbols.h"
+#include "lld/Common/DWARF.h"
 #include "lld/Common/ErrorHandler.h"
 #include "lld/Common/Memory.h"
 #include "llvm-c/lto.h"
@@ -24,6 +25,7 @@
 #include "llvm/DebugInfo/CodeView/SymbolDeserializer.h"
 #include "llvm/DebugInfo/CodeView/SymbolRecord.h"
 #include "llvm/DebugInfo/CodeView/TypeDeserializer.h"
+#include "llvm/LTO/LTO.h"
 #include "llvm/Object/Binary.h"
 #include "llvm/Object/COFF.h"
 #include "llvm/Support/Casting.h"
@@ -42,11 +44,11 @@ using namespace llvm::COFF;
 using namespace llvm::codeview;
 using namespace llvm::object;
 using namespace llvm::support::endian;
+using namespace lld;
+using namespace lld::coff;
 
 using llvm::Triple;
 using llvm::support::ulittle32_t;
-
-namespace lld {
 
 // Returns the last element of a path, which is supposed to be a filename.
 static StringRef getBasename(StringRef path) {
@@ -54,18 +56,16 @@ static StringRef getBasename(StringRef path) {
 }
 
 // Returns a string in the format of "foo.obj" or "foo.obj(bar.lib)".
-std::string toString(const coff::InputFile *file) {
+std::string lld::toString(const coff::InputFile *file) {
   if (!file)
     return "<internal>";
   if (file->parentName.empty() || file->kind() == coff::InputFile::ImportKind)
-    return file->getName();
+    return std::string(file->getName());
 
   return (getBasename(file->parentName) + "(" + getBasename(file->getName()) +
           ")")
       .str();
 }
-
-namespace coff {
 
 std::vector<ObjFile *> ObjFile::instances;
 std::vector<ImportFile *> ImportFile::instances;
@@ -119,13 +119,10 @@ void ArchiveFile::addMember(const Archive::Symbol &sym) {
   driver->enqueueArchiveMember(c, sym, getName());
 }
 
-std::vector<MemoryBufferRef> getArchiveMembers(Archive *file) {
+std::vector<MemoryBufferRef> lld::coff::getArchiveMembers(Archive *file) {
   std::vector<MemoryBufferRef> v;
   Error err = Error::success();
-  for (const ErrorOr<Archive::Child> &cOrErr : file->children(err)) {
-    Archive::Child c =
-        CHECK(cOrErr,
-              file->getFileName() + ": could not get the child of the archive");
+  for (const Archive::Child &c : file->children(err)) {
     MemoryBufferRef mbref =
         CHECK(c.getMemoryBufferRef(),
               file->getFileName() +
@@ -501,6 +498,17 @@ void ObjFile::handleComdatSelection(COFFSymbolRef sym, COMDATType &selection,
     leaderSelection = selection = IMAGE_COMDAT_SELECT_LARGEST;
   }
 
+  // GCCs __declspec(selectany) doesn't actually pick "any" but "same size as".
+  // Clang on the other hand picks "any". To be able to link two object files
+  // with a __declspec(selectany) declaration, one compiled with gcc and the
+  // other with clang, we merge them as proper "same size as"
+  if (config->mingw && ((selection == IMAGE_COMDAT_SELECT_ANY &&
+                         leaderSelection == IMAGE_COMDAT_SELECT_SAME_SIZE) ||
+                        (selection == IMAGE_COMDAT_SELECT_SAME_SIZE &&
+                         leaderSelection == IMAGE_COMDAT_SELECT_ANY))) {
+    leaderSelection = selection = IMAGE_COMDAT_SELECT_SAME_SIZE;
+  }
+
   // Other than that, comdat selections must match.  This is a bit more
   // strict than link.exe which allows merging "any" and "largest" if "any"
   // is the first symbol the linker sees, and it allows merging "largest"
@@ -765,7 +773,8 @@ void ObjFile::initializeDependencies() {
   if (firstType == types.end())
     return;
 
-  debugTypes.emplace(types);
+  // Remember the .debug$T or .debug$P section.
+  debugTypes = data;
 
   if (isPCH) {
     debugTypesObj = makePrecompSource(this);
@@ -795,84 +804,32 @@ void ObjFile::initializeDependencies() {
 Optional<std::pair<StringRef, uint32_t>>
 ObjFile::getVariableLocation(StringRef var) {
   if (!dwarf) {
-    dwarf = DWARFContext::create(*getCOFFObj());
+    dwarf = make<DWARFCache>(DWARFContext::create(*getCOFFObj()));
     if (!dwarf)
       return None;
-    initializeDwarf();
   }
   if (config->machine == I386)
     var.consume_front("_");
-  auto it = variableLoc.find(var);
-  if (it == variableLoc.end())
+  Optional<std::pair<std::string, unsigned>> ret = dwarf->getVariableLoc(var);
+  if (!ret)
     return None;
-
-  // Take file name string from line table.
-  std::string fileName;
-  if (!it->second.lt->getFileNameByIndex(
-          it->second.file, {},
-          DILineInfoSpecifier::FileLineInfoKind::AbsoluteFilePath, fileName))
-    return None;
-
-  return std::make_pair(saver.save(fileName), it->second.line);
+  return std::make_pair(saver.save(ret->first), ret->second);
 }
 
 // Used only for DWARF debug info, which is not common (except in MinGW
-// environments). This initializes the dwarf, lineTables and variableLoc
-// members.
-void ObjFile::initializeDwarf() {
-  for (std::unique_ptr<DWARFUnit> &cu : dwarf->compile_units()) {
-    auto report = [](Error err) {
-      handleAllErrors(std::move(err),
-                      [](ErrorInfoBase &info) { warn(info.message()); });
-    };
-    Expected<const DWARFDebugLine::LineTable *> expectedLT =
-        dwarf->getLineTableForUnit(cu.get(), report);
-    const DWARFDebugLine::LineTable *lt = nullptr;
-    if (expectedLT)
-      lt = *expectedLT;
-    else
-      report(expectedLT.takeError());
-    if (!lt)
-      continue;
-    lineTables.push_back(lt);
-
-    // Loop over variable records and insert them to variableLoc.
-    for (const auto &entry : cu->dies()) {
-      DWARFDie die(cu.get(), &entry);
-      // Skip all tags that are not variables.
-      if (die.getTag() != dwarf::DW_TAG_variable)
-        continue;
-
-      // Skip if a local variable because we don't need them for generating
-      // error messages. In general, only non-local symbols can fail to be
-      // linked.
-      if (!dwarf::toUnsigned(die.find(dwarf::DW_AT_external), 0))
-        continue;
-
-      // Get the source filename index for the variable.
-      unsigned file = dwarf::toUnsigned(die.find(dwarf::DW_AT_decl_file), 0);
-      if (!lt->hasFileAtIndex(file))
-        continue;
-
-      // Get the line number on which the variable is declared.
-      unsigned line = dwarf::toUnsigned(die.find(dwarf::DW_AT_decl_line), 0);
-
-      // Here we want to take the variable name to add it into variableLoc.
-      // Variable can have regular and linkage name associated. At first, we try
-      // to get linkage name as it can be different, for example when we have
-      // two variables in different namespaces of the same object. Use common
-      // name otherwise, but handle the case when it also absent in case if the
-      // input object file lacks some debug info.
-      StringRef name =
-          dwarf::toString(die.find(dwarf::DW_AT_linkage_name),
-                          dwarf::toString(die.find(dwarf::DW_AT_name), ""));
-      if (!name.empty())
-        variableLoc.insert({name, {lt, file, line}});
-    }
+// environments).
+Optional<DILineInfo> ObjFile::getDILineInfo(uint32_t offset,
+                                            uint32_t sectionIndex) {
+  if (!dwarf) {
+    dwarf = make<DWARFCache>(DWARFContext::create(*getCOFFObj()));
+    if (!dwarf)
+      return None;
   }
+
+  return dwarf->getDILineInfo(offset, sectionIndex);
 }
 
-StringRef ltrim1(StringRef s, const char *chars) {
+static StringRef ltrim1(StringRef s, const char *chars) {
   if (!s.empty() && strchr(chars, s[0]))
     return s.substr(1);
   return s;
@@ -890,7 +847,7 @@ void ImportFile::parse() {
   StringRef name = saver.save(StringRef(buf + sizeof(*hdr)));
   StringRef impName = saver.save("__imp_" + name);
   const char *nameStart = buf + sizeof(coff_import_header) + name.size() + 1;
-  dllName = StringRef(nameStart);
+  dllName = std::string(StringRef(nameStart));
   StringRef extName;
   switch (hdr->getNameType()) {
   case IMPORT_ORDINAL:
@@ -929,6 +886,10 @@ void ImportFile::parse() {
 }
 
 BitcodeFile::BitcodeFile(MemoryBufferRef mb, StringRef archiveName,
+                         uint64_t offsetInArchive)
+    : BitcodeFile(mb, archiveName, offsetInArchive, {}) {}
+
+BitcodeFile::BitcodeFile(MemoryBufferRef mb, StringRef archiveName,
                          uint64_t offsetInArchive,
                          std::vector<Symbol *> &&symbols)
     : InputFile(BitcodeKind, mb), symbols(std::move(symbols)) {
@@ -944,11 +905,14 @@ BitcodeFile::BitcodeFile(MemoryBufferRef mb, StringRef archiveName,
   // filename unique.
   MemoryBufferRef mbref(
       mb.getBuffer(),
-      saver.save(archiveName + path +
-                 (archiveName.empty() ? "" : utostr(offsetInArchive))));
+      saver.save(archiveName.empty() ? path
+                                     : archiveName + sys::path::filename(path) +
+                                           utostr(offsetInArchive)));
 
   obj = check(lto::InputFile::create(mbref));
 }
+
+BitcodeFile::~BitcodeFile() = default;
 
 void BitcodeFile::parse() {
   std::vector<std::pair<Symbol *, bool>> comdat(obj->getComdatTable().size());
@@ -967,7 +931,7 @@ void BitcodeFile::parse() {
     } else if (objSym.isWeak() && objSym.isIndirect()) {
       // Weak external.
       sym = symtab->addUndefined(symName, this, true);
-      std::string fallback = objSym.getCOFFWeakExternalFallback();
+      std::string fallback = std::string(objSym.getCOFFWeakExternalFallback());
       Symbol *alias = symtab->addUndefined(saver.save(fallback));
       checkAndSetWeakAlias(symtab, this, sym, alias);
     } else if (comdatIndex != -1) {
@@ -1002,14 +966,11 @@ MachineTypes BitcodeFile::getMachineType() {
   }
 }
 
-std::string replaceThinLTOSuffix(StringRef path) {
+std::string lld::coff::replaceThinLTOSuffix(StringRef path) {
   StringRef suffix = config->thinLTOObjectSuffixReplace.first;
   StringRef repl = config->thinLTOObjectSuffixReplace.second;
 
   if (path.consume_back(suffix))
     return (path + repl).str();
-  return path;
+  return std::string(path);
 }
-
-} // namespace coff
-} // namespace lld

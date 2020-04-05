@@ -37,6 +37,7 @@
 #include "llvm/IR/PassManager.h"
 #include "llvm/IR/Type.h"
 #include "llvm/IR/Value.h"
+#include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
@@ -76,6 +77,9 @@ STATISTIC(NumSubNUW,    "Number of no-unsigned-wrap deductions for sub");
 STATISTIC(NumMulNW,     "Number of no-wrap deductions for mul");
 STATISTIC(NumMulNSW,    "Number of no-signed-wrap deductions for mul");
 STATISTIC(NumMulNUW,    "Number of no-unsigned-wrap deductions for mul");
+STATISTIC(NumShlNW,     "Number of no-wrap deductions for shl");
+STATISTIC(NumShlNSW,    "Number of no-signed-wrap deductions for shl");
+STATISTIC(NumShlNUW,    "Number of no-unsigned-wrap deductions for shl");
 STATISTIC(NumOverflows, "Number of overflow checks removed");
 STATISTIC(NumSaturating,
     "Number of saturating arithmetics converted to normal arithmetics");
@@ -121,7 +125,7 @@ Pass *llvm::createCorrelatedValuePropagationPass() {
 
 static bool processSelect(SelectInst *S, LazyValueInfo *LVI) {
   if (S->getType()->isVectorTy()) return false;
-  if (isa<Constant>(S->getOperand(0))) return false;
+  if (isa<Constant>(S->getCondition())) return false;
 
   Constant *C = LVI->getConstant(S->getCondition(), S->getParent(), S);
   if (!C) return false;
@@ -129,11 +133,7 @@ static bool processSelect(SelectInst *S, LazyValueInfo *LVI) {
   ConstantInt *CI = dyn_cast<ConstantInt>(C);
   if (!CI) return false;
 
-  Value *ReplaceWith = S->getTrueValue();
-  Value *Other = S->getFalseValue();
-  if (!CI->isOne()) std::swap(ReplaceWith, Other);
-  if (ReplaceWith == S) ReplaceWith = UndefValue::get(S->getType());
-
+  Value *ReplaceWith = CI->isOne() ? S->getTrueValue() : S->getFalseValue();
   S->replaceAllUsesWith(ReplaceWith);
   S->eraseFromParent();
 
@@ -191,7 +191,14 @@ static bool simplifyCommonValuePhi(PHINode *P, LazyValueInfo *LVI,
   }
 
   // All constant incoming values map to the same variable along the incoming
-  // edges of the phi. The phi is unnecessary.
+  // edges of the phi. The phi is unnecessary. However, we must drop all
+  // poison-generating flags to ensure that no poison is propagated to the phi
+  // location by performing this substitution.
+  // Warning: If the underlying analysis changes, this may not be enough to
+  //          guarantee that poison is not propagated.
+  // TODO: We may be able to re-infer flags by re-analyzing the instruction.
+  if (auto *CommonInst = dyn_cast<Instruction>(CommonValue))
+    CommonInst->dropPoisonGeneratingFlags();
   P->replaceAllUsesWith(CommonValue);
   P->eraseFromParent();
   ++NumPhiCommon;
@@ -299,9 +306,10 @@ static bool processCmp(CmpInst *Cmp, LazyValueInfo *LVI) {
   // the comparison is testing local values.  While LVI can sometimes reason
   // about such cases, it's not its primary purpose.  We do make sure to do
   // the block local query for uses from terminator instructions, but that's
-  // handled in the code for each terminator.
+  // handled in the code for each terminator. As an exception, we allow phi
+  // nodes, for which LVI can thread the condition into predecessors.
   auto *I = dyn_cast<Instruction>(Op0);
-  if (I && I->getParent() == Cmp->getParent())
+  if (I && I->getParent() == Cmp->getParent() && !isa<PHINode>(I))
     return false;
 
   LazyValueInfo::Tristate Result =
@@ -449,6 +457,11 @@ static void setDeducedOverflowingFlags(Value *V, Instruction::BinaryOps Opcode,
     OpcNW = &NumMulNW;
     OpcNSW = &NumMulNSW;
     OpcNUW = &NumMulNUW;
+    break;
+  case Instruction::Shl:
+    OpcNW = &NumShlNW;
+    OpcNSW = &NumShlNSW;
+    OpcNUW = &NumShlNUW;
     break;
   default:
     llvm_unreachable("Will not be called with other binops");
@@ -777,7 +790,10 @@ static bool processAnd(BinaryOperator *BinOp, LazyValueInfo *LVI) {
   if (!RHS || !RHS->getValue().isMask())
     return false;
 
-  ConstantRange LRange = LVI->getConstantRange(LHS, BB, BinOp);
+  // We can only replace the AND with LHS based on range info if the range does
+  // not include undef.
+  ConstantRange LRange =
+      LVI->getConstantRange(LHS, BB, BinOp, /*UndefAllowed=*/false);
   if (!LRange.getUnsignedMax().ule(RHS->getValue()))
     return false;
 
@@ -860,6 +876,8 @@ static bool runImpl(Function &F, LazyValueInfo *LVI, DominatorTree *DT,
         break;
       case Instruction::Add:
       case Instruction::Sub:
+      case Instruction::Mul:
+      case Instruction::Shl:
         BBChanged |= processBinOp(cast<BinaryOperator>(II), LVI);
         break;
       case Instruction::And:

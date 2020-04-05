@@ -16,11 +16,11 @@ unittest("CodeGenTests") {
   sources = [
     "AArch64SelectionDAGTest.cpp",
     "DIEHashTest.cpp",
+    "LexicalScopesTest.cpp",
     "LowLevelTypeTest.cpp",
     "MachineInstrBundleIteratorTest.cpp",
     "MachineInstrTest.cpp",
     "MachineOperandTest.cpp",
-    "MachineSizeOptsTest.cpp",
     "ScalableVectorMVTsTest.cpp",
     "TargetOptionsTest.cpp",
     "TypeTraitsTest.cpp",

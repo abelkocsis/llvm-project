@@ -21,6 +21,7 @@
 #include "clang/Basic/SourceManager.h"
 #include "clang/Format/Format.h"
 #include "clang/Tooling/Core/Replacement.h"
+#include "clang/Tooling/Syntax/Tokens.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/Support/Error.h"
@@ -68,23 +69,10 @@ Position offsetToPosition(llvm::StringRef Code, size_t Offset);
 /// FIXME: This should return an error if the location is invalid.
 Position sourceLocToPosition(const SourceManager &SM, SourceLocation Loc);
 
-/// Returns the taken range at \p TokLoc.
-llvm::Optional<Range> getTokenRange(const SourceManager &SM,
-                                    const LangOptions &LangOpts,
-                                    SourceLocation TokLoc);
-
 /// Return the file location, corresponding to \p P. Note that one should take
 /// care to avoid comparing the result with expansion locations.
 llvm::Expected<SourceLocation> sourceLocationInMainFile(const SourceManager &SM,
                                                         Position P);
-
-/// Get the beginning SourceLocation at a specified \p Pos in the main file.
-/// May be invalid if Pos is, or if there's no identifier or operators.
-/// The returned position is in the main file, callers may prefer to
-/// obtain the macro expansion location.
-SourceLocation getBeginningOfIdentifier(const Position &Pos,
-                                        const SourceManager &SM,
-                                        const LangOptions &LangOpts);
 
 /// Returns true iff \p Loc is inside the main file. This function handles
 /// file & macro locations. For macro locations, returns iff the macro is being
@@ -106,12 +94,6 @@ SourceLocation includeHashLoc(FileID IncludedFile, const SourceManager &SM);
 ///   * symbols controlled and defined by a compile command-line option
 ///     `-DName=foo`, the spelling location will be "<command line>".
 bool isSpelledInSource(SourceLocation Loc, const SourceManager &SM);
-
-/// Returns the spelling location of the token at Loc if isSpelledInSource,
-/// otherwise its expansion location.
-/// FIXME: Most callers likely want some variant of "file location" instead.
-SourceLocation spellingLocIfSpelled(SourceLocation Loc,
-                                    const SourceManager &SM);
 
 /// Turns a token range into a half-open range and checks its correctness.
 /// The resulting range will have only valid source location on both sides, both
@@ -223,6 +205,9 @@ struct Edit {
   /// Checks whether the Replacements are applicable to given Code.
   bool canApplyTo(llvm::StringRef Code) const;
 };
+/// A mapping from absolute file path (the one used for accessing the underlying
+/// VFS) to edits.
+using FileEdits = llvm::StringMap<Edit>;
 
 /// Formats the edits and code around it according to Style. Changes
 /// Replacements to formatted ones if succeeds.
@@ -231,6 +216,11 @@ llvm::Error reformatEdit(Edit &E, const format::FormatStyle &Style);
 /// Collects identifiers with counts in the source code.
 llvm::StringMap<unsigned> collectIdentifiers(llvm::StringRef Content,
                                              const format::FormatStyle &Style);
+
+/// Collects all ranges of the given identifier in the source code.
+std::vector<Range> collectIdentifierRanges(llvm::StringRef Identifier,
+                                           llvm::StringRef Content,
+                                           const LangOptions &LangOpts);
 
 /// Collects words from the source code.
 /// Unlike collectIdentifiers:
@@ -260,15 +250,45 @@ llvm::StringSet<> collectWords(llvm::StringRef Content);
 ///
 /// visibleNamespaces are {"foo::", "", "a::", "b::", "foo::b::"}, not "a::b::".
 std::vector<std::string> visibleNamespaces(llvm::StringRef Code,
-                                           const format::FormatStyle &Style);
+                                           const LangOptions &LangOpts);
+
+/// Represents locations that can accept a definition.
+struct EligibleRegion {
+  /// Namespace that owns all of the EligiblePoints, e.g.
+  /// namespace a{ namespace b {^ void foo();^} }
+  /// It will be “a::b” for both carrot locations.
+  std::string EnclosingNamespace;
+  /// Offsets into the code marking eligible points to insert a function
+  /// definition.
+  std::vector<Position> EligiblePoints;
+};
+
+/// Returns most eligible region to insert a definition for \p
+/// FullyQualifiedName in the \p Code.
+/// Pseudo parses \pCode under the hood to determine namespace decls and
+/// possible insertion points. Choses the region that matches the longest prefix
+/// of \p FullyQualifiedName. Returns EOF if there are no shared namespaces.
+/// \p FullyQualifiedName should not contain anonymous namespaces.
+EligibleRegion getEligiblePoints(llvm::StringRef Code,
+                                 llvm::StringRef FullyQualifiedName,
+                                 const LangOptions &LangOpts);
 
 struct DefinedMacro {
   llvm::StringRef Name;
   const MacroInfo *Info;
 };
-// Gets the macro at a specified \p Loc.
-llvm::Optional<DefinedMacro> locateMacroAt(SourceLocation Loc,
+/// Gets the macro referenced by \p SpelledTok. It must be a spelled token
+/// aligned to the beginning of an identifier.
+llvm::Optional<DefinedMacro> locateMacroAt(const syntax::Token &SpelledTok,
                                            Preprocessor &PP);
+
+/// Infers whether this is a header from the FileName and LangOpts (if
+/// presents).
+bool isHeaderFile(llvm::StringRef FileName,
+                  llvm::Optional<LangOptions> LangOpts = llvm::None);
+
+/// Returns true if the given location is in a generated protobuf file.
+bool isProtoFile(SourceLocation Loc, const SourceManager &SourceMgr);
 
 } // namespace clangd
 } // namespace clang

@@ -21,7 +21,7 @@ namespace llvm {
 class AArch64FrameLowering : public TargetFrameLowering {
 public:
   explicit AArch64FrameLowering()
-      : TargetFrameLowering(StackGrowsDown, Align(16), 0, 16,
+      : TargetFrameLowering(StackGrowsDown, Align(16), 0, Align(16),
                             true /*StackRealignable*/) {}
 
   void emitCalleeSavedFrameMoves(MachineBasicBlock &MBB,
@@ -44,18 +44,19 @@ public:
                                          unsigned &FrameReg, bool PreferFP,
                                          bool ForSimm) const;
   StackOffset resolveFrameOffsetReference(const MachineFunction &MF,
-                                          int ObjectOffset, bool isFixed,
+                                          int64_t ObjectOffset, bool isFixed,
                                           bool isSVE, unsigned &FrameReg,
                                           bool PreferFP, bool ForSimm) const;
   bool spillCalleeSavedRegisters(MachineBasicBlock &MBB,
                                  MachineBasicBlock::iterator MI,
-                                 const std::vector<CalleeSavedInfo> &CSI,
+                                 ArrayRef<CalleeSavedInfo> CSI,
                                  const TargetRegisterInfo *TRI) const override;
 
-  bool restoreCalleeSavedRegisters(MachineBasicBlock &MBB,
-                                  MachineBasicBlock::iterator MI,
-                                  std::vector<CalleeSavedInfo> &CSI,
-                                  const TargetRegisterInfo *TRI) const override;
+  bool
+  restoreCalleeSavedRegisters(MachineBasicBlock &MBB,
+                              MachineBasicBlock::iterator MI,
+                              MutableArrayRef<CalleeSavedInfo> CSI,
+                              const TargetRegisterInfo *TRI) const override;
 
   /// Can this function use the red zone for local allocations.
   bool canUseRedZone(const MachineFunction &MF) const;
@@ -72,9 +73,14 @@ public:
   }
 
   bool enableStackSlotScavenging(const MachineFunction &MF) const override;
+  TargetStackID::Value getStackIDForScalableVectors() const override;
 
   void processFunctionBeforeFrameFinalized(MachineFunction &MF,
                                              RegScavenger *RS) const override;
+
+  void
+  processFunctionBeforeFrameIndicesReplaced(MachineFunction &MF,
+                                            RegScavenger *RS) const override;
 
   unsigned getWinEHParentFrameOffset(const MachineFunction &MF) const override;
 
@@ -100,8 +106,14 @@ public:
 
 private:
   bool shouldCombineCSRLocalStackBump(MachineFunction &MF,
-                                      unsigned StackBumpBytes) const;
-  int64_t determineSVEStackSize(MachineFrameInfo &MF, unsigned &MaxAlign) const;
+                                      uint64_t StackBumpBytes) const;
+
+  int64_t estimateSVEStackObjectOffsets(MachineFrameInfo &MF) const;
+  int64_t assignSVEStackObjectOffsets(MachineFrameInfo &MF,
+                                      int &MinCSFrameIndex,
+                                      int &MaxCSFrameIndex) const;
+  bool shouldCombineCSRLocalStackBumpInEpilogue(MachineBasicBlock &MBB,
+                                                unsigned StackBumpBytes) const;
 };
 
 } // End llvm namespace

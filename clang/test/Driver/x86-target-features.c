@@ -154,6 +154,11 @@
 // SLH: "-mspeculative-load-hardening"
 // NO-SLH-NOT: retpoline
 
+// RUN: %clang -target i386-linux-gnu -mlvi-cfi %s -### -o %t.o 2>&1 | FileCheck -check-prefix=LVICFI %s
+// RUN: %clang -target i386-linux-gnu -mno-lvi-cfi %s -### -o %t.o 2>&1 | FileCheck -check-prefix=NO-LVICFI %s
+// LVICFI: "-target-feature" "+lvi-cfi"
+// NO-LVICFI-NOT: lvi-cfi
+
 // RUN: %clang -target i386-linux-gnu -mwaitpkg %s -### -o %t.o 2>&1 | FileCheck -check-prefix=WAITPKG %s
 // RUN: %clang -target i386-linux-gnu -mno-waitpkg %s -### -o %t.o 2>&1 | FileCheck -check-prefix=NO-WAITPKG %s
 // WAITPKG: "-target-feature" "+waitpkg"
@@ -193,3 +198,13 @@
 // RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mno-enqcmd %s -### -o %t.o 2>&1 | FileCheck --check-prefix=NO-ENQCMD %s
 // ENQCMD: "-target-feature" "+enqcmd"
 // NO-ENQCMD: "-target-feature" "-enqcmd"
+
+// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mvzeroupper %s -### -o %t.o 2>&1 | FileCheck --check-prefix=VZEROUPPER %s
+// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mno-vzeroupper %s -### -o %t.o 2>&1 | FileCheck --check-prefix=NO-VZEROUPPER %s
+// VZEROUPPER: "-target-feature" "+vzeroupper"
+// NO-VZEROUPPER: "-target-feature" "-vzeroupper"
+
+// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mserialize %s -### -o %t.o 2>&1 | FileCheck -check-prefix=SERIALIZE %s
+// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mno-serialize %s -### -o %t.o 2>&1 | FileCheck -check-prefix=NO-SERIALIZE %s
+// SERIALIZE: "-target-feature" "+serialize"
+// NO-SERIALIZE: "-target-feature" "-serialize"

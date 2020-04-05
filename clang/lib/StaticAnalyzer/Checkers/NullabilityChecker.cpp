@@ -508,13 +508,7 @@ void NullabilityChecker::checkEvent(ImplicitNullDerefEvent Event) const {
 /// return expressions of ObjC types when the return type of the function or
 /// method is non-null but the express is not.
 static const Expr *lookThroughImplicitCasts(const Expr *E) {
-  assert(E);
-
-  while (auto *ICE = dyn_cast<ImplicitCastExpr>(E)) {
-    E = ICE->getSubExpr();
-  }
-
-  return E;
+  return E->IgnoreImpCasts();
 }
 
 /// This method check when nullable pointer or null value is returned from a
@@ -728,11 +722,6 @@ void NullabilityChecker::checkPreCall(const CallEvent &Call,
       }
       continue;
     }
-    // No tracked nullability yet.
-    if (ArgExprTypeLevelNullability != Nullability::Nullable)
-      continue;
-    State = State->set<NullabilityMap>(
-        Region, NullabilityState(ArgExprTypeLevelNullability, ArgExpr));
   }
   if (State != OrigState)
     C.addTransition(State);
@@ -1193,7 +1182,7 @@ void ento::registerNullabilityBase(CheckerManager &mgr) {
   mgr.registerChecker<NullabilityChecker>();
 }
 
-bool ento::shouldRegisterNullabilityBase(const LangOptions &LO) {
+bool ento::shouldRegisterNullabilityBase(const CheckerManager &mgr) {
   return true;
 }
 
@@ -1209,7 +1198,7 @@ bool ento::shouldRegisterNullabilityBase(const LangOptions &LO) {
             checker, "NoDiagnoseCallsToSystemHeaders", true);                  \
   }                                                                            \
                                                                                \
-  bool ento::shouldRegister##name##Checker(const LangOptions &LO) {            \
+  bool ento::shouldRegister##name##Checker(const CheckerManager &mgr) {            \
     return true;                                                               \
   }
 

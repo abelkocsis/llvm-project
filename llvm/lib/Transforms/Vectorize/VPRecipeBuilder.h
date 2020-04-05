@@ -47,6 +47,21 @@ class VPRecipeBuilder {
   EdgeMaskCacheTy EdgeMaskCache;
   BlockMaskCacheTy BlockMaskCache;
 
+  // VPlan-VPlan transformations support: Hold a mapping from ingredients to
+  // their recipe. To save on memory, only do so for selected ingredients,
+  // marked by having a nullptr entry in this map.
+  DenseMap<Instruction *, VPRecipeBase *> Ingredient2Recipe;
+
+  /// Set the recipe created for given ingredient. This operation is a no-op for
+  /// ingredients that were not marked using a nullptr entry in the map.
+  void setRecipe(Instruction *I, VPRecipeBase *R) {
+    if (!Ingredient2Recipe.count(I))
+      return;
+    assert(Ingredient2Recipe[I] == nullptr &&
+           "Recipe already set for ingredient");
+    Ingredient2Recipe[I] = R;
+  }
+
 public:
   /// A helper function that computes the predicate of the block BB, assuming
   /// that the header block of the loop is set to True. It returns the *entry*
@@ -57,16 +72,22 @@ public:
   /// and DST.
   VPValue *createEdgeMask(BasicBlock *Src, BasicBlock *Dst, VPlanPtr &Plan);
 
-  /// Check if \I belongs to an Interleave Group within the given VF \p Range,
-  /// \return true in the first returned value if so and false otherwise.
-  /// Build a new VPInterleaveGroup Recipe if \I is the primary member of an IG
-  /// for \p Range.Start, and provide it as the second returned value.
-  /// Note that if \I is an adjunct member of an IG for \p Range.Start, the
-  /// \return value is <true, nullptr>, as it is handled by another recipe.
-  /// \p Range.End may be decreased to ensure same decision from \p Range.Start
-  /// to \p Range.End.
-  VPInterleaveRecipe *tryToInterleaveMemory(Instruction *I, VFRange &Range,
-                                            VPlanPtr &Plan);
+  /// Mark given ingredient for recording its recipe once one is created for
+  /// it.
+  void recordRecipeOf(Instruction *I) {
+    assert((!Ingredient2Recipe.count(I) || Ingredient2Recipe[I] == nullptr) &&
+           "Recipe already set for ingredient");
+    Ingredient2Recipe[I] = nullptr;
+  }
+
+  /// Return the recipe created for given ingredient.
+  VPRecipeBase *getRecipe(Instruction *I) {
+    assert(Ingredient2Recipe.count(I) &&
+           "Recording this ingredients recipe was not requested");
+    assert(Ingredient2Recipe[I] != nullptr &&
+           "Ingredient doesn't have a recipe");
+    return Ingredient2Recipe[I];
+  }
 
   /// Check if \I is a memory instruction to be widened for \p Range.Start and
   /// potentially masked. Such instructions are handled by a recipe that takes
@@ -87,12 +108,10 @@ public:
   VPBlendRecipe *tryToBlend(Instruction *I, VPlanPtr &Plan);
 
   /// Check if \p I can be widened within the given VF \p Range. If \p I can be
-  /// widened for \p Range.Start, check if the last recipe of \p VPBB can be
-  /// extended to include \p I or else build a new VPWidenRecipe for it and
-  /// append it to \p VPBB. Return true if \p I can be widened for Range.Start,
-  /// false otherwise. Range.End may be decreased to ensure same decision from
-  /// \p Range.Start to \p Range.End.
-  bool tryToWiden(Instruction *I, VPBasicBlock *VPBB, VFRange &Range);
+  /// widened for \p Range.Start, build a new VPWidenRecipe and return it.
+  /// Range.End may be decreased to ensure same decision from \p Range.Start to
+  /// \p Range.End.
+  VPWidenRecipe *tryToWiden(Instruction *I, VFRange &Range);
 
   /// Create a replicating region for instruction \p I that requires
   /// predication. \p PredRecipe is a VPReplicateRecipe holding \p I.

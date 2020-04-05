@@ -52,11 +52,12 @@ using namespace llvm;
 enum AllocType : uint8_t {
   OpNewLike          = 1<<0, // allocates; never returns null
   MallocLike         = 1<<1 | OpNewLike, // allocates; may return null
-  CallocLike         = 1<<2, // allocates + bzero
-  ReallocLike        = 1<<3, // reallocates
-  StrDupLike         = 1<<4,
-  MallocOrCallocLike = MallocLike | CallocLike,
-  AllocLike          = MallocLike | CallocLike | StrDupLike,
+  AlignedAllocLike   = 1<<2, // allocates with alignment; may return null
+  CallocLike         = 1<<3, // allocates + bzero
+  ReallocLike        = 1<<4, // reallocates
+  StrDupLike         = 1<<5,
+  MallocOrCallocLike = MallocLike | CallocLike | AlignedAllocLike,
+  AllocLike          = MallocOrCallocLike | StrDupLike,
   AnyAlloc           = AllocLike | ReallocLike
 };
 
@@ -100,6 +101,7 @@ static const std::pair<LibFunc, AllocFnsTy> AllocationFnData[] = {
   {LibFunc_msvc_new_array_int_nothrow, {MallocLike,  2, 0,  -1}}, // new[](unsigned int, nothrow)
   {LibFunc_msvc_new_array_longlong,         {OpNewLike,   1, 0,  -1}}, // new[](unsigned long long)
   {LibFunc_msvc_new_array_longlong_nothrow, {MallocLike,  2, 0,  -1}}, // new[](unsigned long long, nothrow)
+  {LibFunc_aligned_alloc,       {AlignedAllocLike, 2, 1,  -1}},
   {LibFunc_calloc,              {CallocLike,  2, 0,   1}},
   {LibFunc_realloc,             {ReallocLike, 2, 1,  -1}},
   {LibFunc_reallocf,            {ReallocLike, 2, 1,  -1}},
@@ -262,6 +264,20 @@ bool llvm::isMallocLikeFn(
     const Value *V, function_ref<const TargetLibraryInfo &(Function &)> GetTLI,
     bool LookThroughBitCast) {
   return getAllocationData(V, MallocLike, GetTLI, LookThroughBitCast)
+      .hasValue();
+}
+
+/// Tests if a value is a call or invoke to a library function that
+/// allocates uninitialized memory with alignment (such as aligned_alloc).
+bool llvm::isAlignedAllocLikeFn(const Value *V, const TargetLibraryInfo *TLI,
+                                bool LookThroughBitCast) {
+  return getAllocationData(V, AlignedAllocLike, TLI, LookThroughBitCast)
+      .hasValue();
+}
+bool llvm::isAlignedAllocLikeFn(
+    const Value *V, function_ref<const TargetLibraryInfo &(Function &)> GetTLI,
+    bool LookThroughBitCast) {
+  return getAllocationData(V, AlignedAllocLike, GetTLI, LookThroughBitCast)
       .hasValue();
 }
 
@@ -544,6 +560,7 @@ Value *llvm::lowerObjectSizeCall(IntrinsicInst *ObjectSize,
           Builder.CreateSub(SizeOffsetPair.first, SizeOffsetPair.second);
       Value *UseZero =
           Builder.CreateICmpULT(SizeOffsetPair.first, SizeOffsetPair.second);
+      ResultSize = Builder.CreateZExtOrTrunc(ResultSize, ResultType);
       return Builder.CreateSelect(UseZero, ConstantInt::get(ResultType, 0),
                                   ResultSize);
     }
@@ -576,7 +593,7 @@ ObjectSizeOffsetVisitor::ObjectSizeOffsetVisitor(const DataLayout &DL,
 }
 
 SizeOffsetType ObjectSizeOffsetVisitor::compute(Value *V) {
-  IntTyBits = DL.getPointerTypeSizeInBits(V->getType());
+  IntTyBits = DL.getIndexTypeSizeInBits(V->getType());
   Zero = APInt::getNullValue(IntTyBits);
 
   V = V->stripPointerCasts();
@@ -630,6 +647,10 @@ bool ObjectSizeOffsetVisitor::CheckedZextOrTrunc(APInt &I) {
 
 SizeOffsetType ObjectSizeOffsetVisitor::visitAllocaInst(AllocaInst &I) {
   if (!I.getAllocatedType()->isSized())
+    return unknown();
+
+  if (I.getAllocatedType()->isVectorTy() &&
+      I.getAllocatedType()->getVectorIsScalable())
     return unknown();
 
   APInt Size(IntTyBits, DL.getTypeAllocSize(I.getAllocatedType()));
@@ -746,7 +767,7 @@ ObjectSizeOffsetVisitor::visitExtractValueInst(ExtractValueInst&) {
 
 SizeOffsetType ObjectSizeOffsetVisitor::visitGEPOperator(GEPOperator &GEP) {
   SizeOffsetType PtrData = compute(GEP.getPointerOperand());
-  APInt Offset(IntTyBits, 0);
+  APInt Offset(DL.getIndexTypeSizeInBits(GEP.getPointerOperand()->getType()), 0);
   if (!bothKnown(PtrData) || !GEP.accumulateConstantOffset(DL, Offset))
     return unknown();
 
@@ -834,7 +855,7 @@ ObjectSizeOffsetEvaluator::ObjectSizeOffsetEvaluator(
 
 SizeOffsetEvalType ObjectSizeOffsetEvaluator::compute(Value *V) {
   // XXX - Are vectors of pointers possible here?
-  IntTy = cast<IntegerType>(DL.getIntPtrType(V->getType()));
+  IntTy = cast<IntegerType>(DL.getIndexType(V->getType()));
   Zero = ConstantInt::get(IntTy, 0);
 
   SizeOffsetEvalType Result = compute_(V);
@@ -938,12 +959,12 @@ SizeOffsetEvalType ObjectSizeOffsetEvaluator::visitCallSite(CallSite CS) {
   }
 
   Value *FirstArg = CS.getArgument(FnData->FstParam);
-  FirstArg = Builder.CreateZExt(FirstArg, IntTy);
+  FirstArg = Builder.CreateZExtOrTrunc(FirstArg, IntTy);
   if (FnData->SndParam < 0)
     return std::make_pair(FirstArg, Zero);
 
   Value *SecondArg = CS.getArgument(FnData->SndParam);
-  SecondArg = Builder.CreateZExt(SecondArg, IntTy);
+  SecondArg = Builder.CreateZExtOrTrunc(SecondArg, IntTy);
   Value *Size = Builder.CreateMul(FirstArg, SecondArg);
   return std::make_pair(Size, Zero);
 

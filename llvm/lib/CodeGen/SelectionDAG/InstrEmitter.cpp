@@ -195,7 +195,10 @@ void InstrEmitter::CreateVirtualRegisters(SDNode *Node,
          "IMPLICIT_DEF should have been handled as a special case elsewhere!");
 
   unsigned NumResults = CountResults(Node);
-  for (unsigned i = 0; i < II.getNumDefs(); ++i) {
+  bool HasVRegVariadicDefs = !MF->getTarget().usesPhysRegsForValues() &&
+                             II.isVariadic() && II.variadicOpsAreDefs();
+  unsigned NumVRegs = HasVRegVariadicDefs ? NumResults : II.getNumDefs();
+  for (unsigned i = 0; i < NumVRegs; ++i) {
     // If the specific node value is only used by a CopyToReg and the dest reg
     // is a vreg in the same register class, use the CopyToReg'd destination
     // register instead of creating a new vreg.
@@ -216,7 +219,7 @@ void InstrEmitter::CreateVirtualRegisters(SDNode *Node,
         RC = VTRC;
     }
 
-    if (II.OpInfo[i].isOptionalDef()) {
+    if (II.OpInfo != nullptr && II.OpInfo[i].isOptionalDef()) {
       // Optional def must be a physical register.
       VRBase = cast<RegisterSDNode>(Node->getOperand(i-NumResults))->getReg();
       assert(Register::isPhysicalRegister(VRBase));
@@ -483,8 +486,8 @@ void InstrEmitter::EmitSubregNode(SDNode *Node,
   for (SDNode *User : Node->uses()) {
     if (User->getOpcode() == ISD::CopyToReg &&
         User->getOperand(2).getNode() == Node) {
-      unsigned DestReg = cast<RegisterSDNode>(User->getOperand(1))->getReg();
-      if (Register::isVirtualRegister(DestReg)) {
+      Register DestReg = cast<RegisterSDNode>(User->getOperand(1))->getReg();
+      if (DestReg.isVirtual()) {
         VRBase = DestReg;
         break;
       }
@@ -499,7 +502,7 @@ void InstrEmitter::EmitSubregNode(SDNode *Node,
     const TargetRegisterClass *TRC =
       TLI->getRegClassFor(Node->getSimpleValueType(0), Node->isDivergent());
 
-    unsigned Reg;
+    Register Reg;
     MachineInstr *DefMI;
     RegisterSDNode *R = dyn_cast<RegisterSDNode>(Node->getOperand(0));
     if (R && Register::isPhysicalRegister(R->getReg())) {
@@ -510,7 +513,8 @@ void InstrEmitter::EmitSubregNode(SDNode *Node,
       DefMI = MRI->getVRegDef(Reg);
     }
 
-    unsigned SrcReg, DstReg, DefSubIdx;
+    Register SrcReg, DstReg;
+    unsigned DefSubIdx;
     if (DefMI &&
         TII->isCoalescableExtInstr(*DefMI, SrcReg, DstReg, DefSubIdx) &&
         SubIdx == DefSubIdx &&
@@ -528,7 +532,7 @@ void InstrEmitter::EmitSubregNode(SDNode *Node,
       // Reg may not support a SubIdx sub-register, and we may need to
       // constrain its register class or issue a COPY to a compatible register
       // class.
-      if (Register::isVirtualRegister(Reg))
+      if (Reg.isVirtual())
         Reg = ConstrainForSubReg(Reg, SubIdx,
                                  Node->getOperand(0).getSimpleValueType(),
                                  Node->isDivergent(), Node->getDebugLoc());
@@ -540,7 +544,7 @@ void InstrEmitter::EmitSubregNode(SDNode *Node,
       MachineInstrBuilder CopyMI =
           BuildMI(*MBB, InsertPos, Node->getDebugLoc(),
                   TII->get(TargetOpcode::COPY), VRBase);
-      if (Register::isVirtualRegister(Reg))
+      if (Reg.isVirtual())
         CopyMI.addReg(Reg, 0, SubIdx);
       else
         CopyMI.addReg(TRI->getSubReg(Reg, SubIdx));
@@ -677,7 +681,7 @@ MachineInstr *
 InstrEmitter::EmitDbgValue(SDDbgValue *SD,
                            DenseMap<SDValue, unsigned> &VRBaseMap) {
   MDNode *Var = SD->getVariable();
-  const DIExpression *Expr = SD->getExpression();
+  MDNode *Expr = SD->getExpression();
   DebugLoc DL = SD->getDebugLoc();
   assert(cast<DILocalVariable>(Var)->isValidLocationForIntrinsic(DL) &&
          "Expected inlined-at fields to agree");
@@ -701,11 +705,12 @@ InstrEmitter::EmitDbgValue(SDDbgValue *SD,
     // EmitTargetCodeForFrameDebugValue is responsible for allocation.
     auto FrameMI = BuildMI(*MF, DL, TII->get(TargetOpcode::DBG_VALUE))
                        .addFrameIndex(SD->getFrameIx());
-
     if (SD->isIndirect())
-      Expr = DIExpression::append(Expr, {dwarf::DW_OP_deref});
-
-    FrameMI.addReg(0);
+      // Push [fi + 0] onto the DIExpression stack.
+      FrameMI.addImm(0);
+    else
+      // Push fi onto the DIExpression stack.
+      FrameMI.addReg(0);
     return FrameMI.addMetadata(Var).addMetadata(Expr);
   }
   // Otherwise, we're going to create an instruction here.
@@ -751,9 +756,9 @@ InstrEmitter::EmitDbgValue(SDDbgValue *SD,
 
   // Indirect addressing is indicated by an Imm as the second parameter.
   if (SD->isIndirect())
-    Expr = DIExpression::append(Expr, {dwarf::DW_OP_deref});
-
-  MIB.addReg(0U, RegState::Debug);
+    MIB.addImm(0U);
+  else
+    MIB.addReg(0U, RegState::Debug);
 
   MIB.addMetadata(Var);
   MIB.addMetadata(Expr);
@@ -828,7 +833,10 @@ EmitMachineNode(SDNode *Node, bool IsClone, bool IsCloned,
   unsigned NumImpUses = 0;
   unsigned NodeOperands =
     countOperands(Node, II.getNumOperands() - NumDefs, NumImpUses);
-  bool HasPhysRegOuts = NumResults > NumDefs && II.getImplicitDefs()!=nullptr;
+  bool HasVRegVariadicDefs = !MF->getTarget().usesPhysRegsForValues() &&
+                             II.isVariadic() && II.variadicOpsAreDefs();
+  bool HasPhysRegOuts = NumResults > NumDefs &&
+                        II.getImplicitDefs() != nullptr && !HasVRegVariadicDefs;
 #ifndef NDEBUG
   unsigned NumMIOperands = NodeOperands + NumResults;
   if (II.isVariadic())
@@ -882,8 +890,8 @@ EmitMachineNode(SDNode *Node, bool IsClone, bool IsCloned,
     if (Flags.hasExact())
       MI->setFlag(MachineInstr::MIFlag::IsExact);
 
-    if (Flags.hasFPExcept())
-      MI->setFlag(MachineInstr::MIFlag::FPExcept);
+    if (Flags.hasNoFPExcept())
+      MI->setFlag(MachineInstr::MIFlag::NoFPExcept);
   }
 
   // Emit all of the actual operands of this instruction, adding them to the

@@ -88,17 +88,20 @@ void AArch64Subtarget::initializeProperties() {
   case CortexA76:
     PrefFunctionLogAlignment = 4;
     break;
-  case Cyclone:
+  case A64FX:
+    CacheLineSize = 256;
+    PrefFunctionLogAlignment = 5;
+    PrefLoopLogAlignment = 5;
+    break;
+  case AppleA7:
+  case AppleA10:
+  case AppleA11:
+  case AppleA12:
+  case AppleA13:
     CacheLineSize = 64;
     PrefetchDistance = 280;
     MinPrefetchStride = 2048;
     MaxPrefetchIterationsAhead = 3;
-    break;
-  case ExynosM1:
-    MaxInterleaveFactor = 4;
-    MaxJumpTableSize = 8;
-    PrefFunctionLogAlignment = 4;
-    PrefLoopLogAlignment = 3;
     break;
   case ExynosM3:
     MaxInterleaveFactor = 4;
@@ -256,6 +259,10 @@ unsigned AArch64Subtarget::classifyGlobalFunctionReference(
   if (UseNonLazyBind && F && F->hasFnAttribute(Attribute::NonLazyBind) &&
       !TM.shouldAssumeDSOLocal(*GV->getParent(), GV))
     return AArch64II::MO_GOT;
+
+  // Use ClassifyGlobalReference for setting MO_DLLIMPORT/MO_COFFSTUB.
+  if (getTargetTriple().isOSWindows())
+    return ClassifyGlobalReference(GV, TM);
 
   return AArch64II::MO_NO_FLAG;
 }

@@ -111,7 +111,7 @@ define i1 @length2_eq_nobuiltin_attr(i8* %X, i8* %Y) nounwind optsize {
 
 define i32 @length3(i8* %X, i8* %Y) nounwind optsize {
 ; X86-LABEL: length3:
-; X86:       # %bb.0: # %loadbb
+; X86:       # %bb.0:
 ; X86-NEXT:    pushl %esi
 ; X86-NEXT:    movl {{[0-9]+}}(%esp), %ecx
 ; X86-NEXT:    movl {{[0-9]+}}(%esp), %eax
@@ -120,34 +120,34 @@ define i32 @length3(i8* %X, i8* %Y) nounwind optsize {
 ; X86-NEXT:    rolw $8, %dx
 ; X86-NEXT:    rolw $8, %si
 ; X86-NEXT:    cmpw %si, %dx
-; X86-NEXT:    jne .LBB4_1
-; X86-NEXT:  # %bb.2: # %loadbb1
+; X86-NEXT:    jne .LBB4_3
+; X86-NEXT:  # %bb.1: # %loadbb1
 ; X86-NEXT:    movzbl 2(%eax), %eax
 ; X86-NEXT:    movzbl 2(%ecx), %ecx
 ; X86-NEXT:    subl %ecx, %eax
-; X86-NEXT:    jmp .LBB4_3
-; X86-NEXT:  .LBB4_1: # %res_block
+; X86-NEXT:    jmp .LBB4_2
+; X86-NEXT:  .LBB4_3: # %res_block
 ; X86-NEXT:    setae %al
 ; X86-NEXT:    movzbl %al, %eax
 ; X86-NEXT:    leal -1(%eax,%eax), %eax
-; X86-NEXT:  .LBB4_3: # %endblock
+; X86-NEXT:  .LBB4_2: # %endblock
 ; X86-NEXT:    popl %esi
 ; X86-NEXT:    retl
 ;
 ; X64-LABEL: length3:
-; X64:       # %bb.0: # %loadbb
+; X64:       # %bb.0:
 ; X64-NEXT:    movzwl (%rdi), %eax
 ; X64-NEXT:    movzwl (%rsi), %ecx
 ; X64-NEXT:    rolw $8, %ax
 ; X64-NEXT:    rolw $8, %cx
 ; X64-NEXT:    cmpw %cx, %ax
-; X64-NEXT:    jne .LBB4_1
-; X64-NEXT:  # %bb.2: # %loadbb1
+; X64-NEXT:    jne .LBB4_3
+; X64-NEXT:  # %bb.1: # %loadbb1
 ; X64-NEXT:    movzbl 2(%rdi), %eax
 ; X64-NEXT:    movzbl 2(%rsi), %ecx
 ; X64-NEXT:    subl %ecx, %eax
 ; X64-NEXT:    retq
-; X64-NEXT:  .LBB4_1: # %res_block
+; X64-NEXT:  .LBB4_3: # %res_block
 ; X64-NEXT:    setae %al
 ; X64-NEXT:    movzbl %al, %eax
 ; X64-NEXT:    leal -1(%rax,%rax), %eax
@@ -256,7 +256,7 @@ define i1 @length4_eq_const(i8* %X) nounwind optsize {
 
 define i32 @length5(i8* %X, i8* %Y) nounwind optsize {
 ; X86-LABEL: length5:
-; X86:       # %bb.0: # %loadbb
+; X86:       # %bb.0:
 ; X86-NEXT:    pushl %esi
 ; X86-NEXT:    movl {{[0-9]+}}(%esp), %ecx
 ; X86-NEXT:    movl {{[0-9]+}}(%esp), %eax
@@ -265,34 +265,34 @@ define i32 @length5(i8* %X, i8* %Y) nounwind optsize {
 ; X86-NEXT:    bswapl %edx
 ; X86-NEXT:    bswapl %esi
 ; X86-NEXT:    cmpl %esi, %edx
-; X86-NEXT:    jne .LBB9_1
-; X86-NEXT:  # %bb.2: # %loadbb1
+; X86-NEXT:    jne .LBB9_3
+; X86-NEXT:  # %bb.1: # %loadbb1
 ; X86-NEXT:    movzbl 4(%eax), %eax
 ; X86-NEXT:    movzbl 4(%ecx), %ecx
 ; X86-NEXT:    subl %ecx, %eax
-; X86-NEXT:    jmp .LBB9_3
-; X86-NEXT:  .LBB9_1: # %res_block
+; X86-NEXT:    jmp .LBB9_2
+; X86-NEXT:  .LBB9_3: # %res_block
 ; X86-NEXT:    setae %al
 ; X86-NEXT:    movzbl %al, %eax
 ; X86-NEXT:    leal -1(%eax,%eax), %eax
-; X86-NEXT:  .LBB9_3: # %endblock
+; X86-NEXT:  .LBB9_2: # %endblock
 ; X86-NEXT:    popl %esi
 ; X86-NEXT:    retl
 ;
 ; X64-LABEL: length5:
-; X64:       # %bb.0: # %loadbb
+; X64:       # %bb.0:
 ; X64-NEXT:    movl (%rdi), %eax
 ; X64-NEXT:    movl (%rsi), %ecx
 ; X64-NEXT:    bswapl %eax
 ; X64-NEXT:    bswapl %ecx
 ; X64-NEXT:    cmpl %ecx, %eax
-; X64-NEXT:    jne .LBB9_1
-; X64-NEXT:  # %bb.2: # %loadbb1
+; X64-NEXT:    jne .LBB9_3
+; X64-NEXT:  # %bb.1: # %loadbb1
 ; X64-NEXT:    movzbl 4(%rdi), %eax
 ; X64-NEXT:    movzbl 4(%rsi), %ecx
 ; X64-NEXT:    subl %ecx, %eax
 ; X64-NEXT:    retq
-; X64-NEXT:  .LBB9_1: # %res_block
+; X64-NEXT:  .LBB9_3: # %res_block
 ; X64-NEXT:    setae %al
 ; X64-NEXT:    movzbl %al, %eax
 ; X64-NEXT:    leal -1(%rax,%rax), %eax
@@ -684,8 +684,8 @@ define i1 @length24_eq(i8* %x, i8* %y) nounwind optsize {
 ; X64-AVX-LABEL: length24_eq:
 ; X64-AVX:       # %bb.0:
 ; X64-AVX-NEXT:    vmovdqu (%rdi), %xmm0
-; X64-AVX-NEXT:    vmovq 16(%rdi), %xmm1
-; X64-AVX-NEXT:    vmovq 16(%rsi), %xmm2
+; X64-AVX-NEXT:    vmovq {{.*#+}} xmm1 = mem[0],zero
+; X64-AVX-NEXT:    vmovq {{.*#+}} xmm2 = mem[0],zero
 ; X64-AVX-NEXT:    vpxor %xmm2, %xmm1, %xmm1
 ; X64-AVX-NEXT:    vpxor (%rsi), %xmm0, %xmm0
 ; X64-AVX-NEXT:    vpor %xmm1, %xmm0, %xmm0
@@ -738,7 +738,7 @@ define i1 @length24_eq_const(i8* %X) nounwind optsize {
 ; X64-AVX-LABEL: length24_eq_const:
 ; X64-AVX:       # %bb.0:
 ; X64-AVX-NEXT:    vmovdqu (%rdi), %xmm0
-; X64-AVX-NEXT:    vmovq 16(%rdi), %xmm1
+; X64-AVX-NEXT:    vmovq {{.*#+}} xmm1 = mem[0],zero
 ; X64-AVX-NEXT:    vpxor {{.*}}(%rip), %xmm1, %xmm1
 ; X64-AVX-NEXT:    vpxor {{.*}}(%rip), %xmm0, %xmm0
 ; X64-AVX-NEXT:    vpor %xmm1, %xmm0, %xmm0
@@ -816,13 +816,11 @@ define i1 @length32_eq(i8* %x, i8* %y) nounwind optsize {
 ;
 ; X64-AVX1-LABEL: length32_eq:
 ; X64-AVX1:       # %bb.0:
-; X64-AVX1-NEXT:    vmovdqu (%rdi), %xmm0
-; X64-AVX1-NEXT:    vmovdqu 16(%rdi), %xmm1
-; X64-AVX1-NEXT:    vpxor 16(%rsi), %xmm1, %xmm1
-; X64-AVX1-NEXT:    vpxor (%rsi), %xmm0, %xmm0
-; X64-AVX1-NEXT:    vpor %xmm1, %xmm0, %xmm0
-; X64-AVX1-NEXT:    vptest %xmm0, %xmm0
+; X64-AVX1-NEXT:    vmovups (%rdi), %ymm0
+; X64-AVX1-NEXT:    vxorps (%rsi), %ymm0, %ymm0
+; X64-AVX1-NEXT:    vptest %ymm0, %ymm0
 ; X64-AVX1-NEXT:    sete %al
+; X64-AVX1-NEXT:    vzeroupper
 ; X64-AVX1-NEXT:    retq
 ;
 ; X64-AVX2-LABEL: length32_eq:
@@ -878,13 +876,11 @@ define i1 @length32_eq_const(i8* %X) nounwind optsize {
 ;
 ; X64-AVX1-LABEL: length32_eq_const:
 ; X64-AVX1:       # %bb.0:
-; X64-AVX1-NEXT:    vmovdqu (%rdi), %xmm0
-; X64-AVX1-NEXT:    vmovdqu 16(%rdi), %xmm1
-; X64-AVX1-NEXT:    vpxor {{.*}}(%rip), %xmm1, %xmm1
-; X64-AVX1-NEXT:    vpxor {{.*}}(%rip), %xmm0, %xmm0
-; X64-AVX1-NEXT:    vpor %xmm1, %xmm0, %xmm0
-; X64-AVX1-NEXT:    vptest %xmm0, %xmm0
+; X64-AVX1-NEXT:    vmovups (%rdi), %ymm0
+; X64-AVX1-NEXT:    vxorps {{.*}}(%rip), %ymm0, %ymm0
+; X64-AVX1-NEXT:    vptest %ymm0, %ymm0
 ; X64-AVX1-NEXT:    setne %al
+; X64-AVX1-NEXT:    vzeroupper
 ; X64-AVX1-NEXT:    retq
 ;
 ; X64-AVX2-LABEL: length32_eq_const:
@@ -944,12 +940,14 @@ define i1 @length64_eq(i8* %x, i8* %y) nounwind optsize {
 ;
 ; X64-AVX1-LABEL: length64_eq:
 ; X64-AVX1:       # %bb.0:
-; X64-AVX1-NEXT:    pushq %rax
-; X64-AVX1-NEXT:    movl $64, %edx
-; X64-AVX1-NEXT:    callq memcmp
-; X64-AVX1-NEXT:    testl %eax, %eax
+; X64-AVX1-NEXT:    vmovups (%rdi), %ymm0
+; X64-AVX1-NEXT:    vmovups 32(%rdi), %ymm1
+; X64-AVX1-NEXT:    vxorps 32(%rsi), %ymm1, %ymm1
+; X64-AVX1-NEXT:    vxorps (%rsi), %ymm0, %ymm0
+; X64-AVX1-NEXT:    vorps %ymm1, %ymm0, %ymm0
+; X64-AVX1-NEXT:    vptest %ymm0, %ymm0
 ; X64-AVX1-NEXT:    setne %al
-; X64-AVX1-NEXT:    popq %rcx
+; X64-AVX1-NEXT:    vzeroupper
 ; X64-AVX1-NEXT:    retq
 ;
 ; X64-AVX2-LABEL: length64_eq:
@@ -994,13 +992,14 @@ define i1 @length64_eq_const(i8* %X) nounwind optsize {
 ;
 ; X64-AVX1-LABEL: length64_eq_const:
 ; X64-AVX1:       # %bb.0:
-; X64-AVX1-NEXT:    pushq %rax
-; X64-AVX1-NEXT:    movl $.L.str, %esi
-; X64-AVX1-NEXT:    movl $64, %edx
-; X64-AVX1-NEXT:    callq memcmp
-; X64-AVX1-NEXT:    testl %eax, %eax
+; X64-AVX1-NEXT:    vmovups (%rdi), %ymm0
+; X64-AVX1-NEXT:    vmovups 32(%rdi), %ymm1
+; X64-AVX1-NEXT:    vxorps {{.*}}(%rip), %ymm1, %ymm1
+; X64-AVX1-NEXT:    vxorps {{.*}}(%rip), %ymm0, %ymm0
+; X64-AVX1-NEXT:    vorps %ymm1, %ymm0, %ymm0
+; X64-AVX1-NEXT:    vptest %ymm0, %ymm0
 ; X64-AVX1-NEXT:    sete %al
-; X64-AVX1-NEXT:    popq %rcx
+; X64-AVX1-NEXT:    vzeroupper
 ; X64-AVX1-NEXT:    retq
 ;
 ; X64-AVX2-LABEL: length64_eq_const:

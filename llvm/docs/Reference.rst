@@ -23,7 +23,7 @@ LLVM and API reference documentation.
    FuzzingLLVM
    GarbageCollection
    GetElementPtr
-   GlobalISel
+   GlobalISel/index
    GwpAsan
    HowToSetUpLLVMStyleRTTI
    HowToUseAttributes
@@ -36,6 +36,7 @@ LLVM and API reference documentation.
    ORCv2
    PDB/index
    ScudoHardenedAllocator
+   MemTagSanitizer
    SegmentedStacks
    StackMaps
    SpeculativeLoadHardening
@@ -52,8 +53,8 @@ LLVM and API reference documentation.
 API Reference
 -------------
 
-`Doxygen generated documentation <http://llvm.org/doxygen/>`_
-  (`classes <http://llvm.org/doxygen/inherits.html>`_)
+`Doxygen generated documentation <https://llvm.org/doxygen/>`_
+  (`classes <https://llvm.org/doxygen/inherits.html>`_)
 
 :doc:`HowToUseAttributes`
   Answers some questions about the new Attributes infrastructure.
@@ -125,7 +126,7 @@ LLVM IR
    A reference manual for the MIR serialization format, which is used to test
    LLVM's code generation passes.
 
-:doc:`GlobalISel`
+:doc:`GlobalISel/index`
   This describes the prototype instruction selection replacement, GlobalISel.
 
 =====================
@@ -186,6 +187,10 @@ Additional Topics
 
 :doc:`ScudoHardenedAllocator`
   A library that implements a security-hardened `malloc()`.
+
+:doc:`MemTagSanitizer`
+  Security hardening for production code aiming to mitigate memory
+  related vulnerabilities. Based on the Armv8.5-A Memory Tagging Extension.
 
 :doc:`Dependence Graphs <DependenceGraphs/index>`
   A description of the design of the various dependence graphs such as

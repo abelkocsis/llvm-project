@@ -15,6 +15,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/InitializePasses.h"
 #define AA_NAME "alignment-from-assumptions"
 #define DEBUG_TYPE AA_NAME
 #include "llvm/Transforms/Scalar/AlignmentFromAssumptions.h"
@@ -126,6 +127,11 @@ static unsigned getNewAlignment(const SCEV *AASCEV, const SCEV *AlignSCEV,
                                 const SCEV *OffSCEV, Value *Ptr,
                                 ScalarEvolution *SE) {
   const SCEV *PtrSCEV = SE->getSCEV(Ptr);
+  // On a platform with 32-bit allocas, but 64-bit flat/global pointer sizes
+  // (*cough* AMDGPU), the effective SCEV type of AASCEV and PtrSCEV
+  // may disagree. Trunc/extend so they agree.
+  PtrSCEV = SE->getTruncateOrZeroExtend(
+      PtrSCEV, SE->getEffectiveSCEVType(AASCEV->getType()));
   const SCEV *DiffSCEV = SE->getMinusSCEV(PtrSCEV, AASCEV);
 
   // On 32-bit platforms, DiffSCEV might now have type i32 -- we've always

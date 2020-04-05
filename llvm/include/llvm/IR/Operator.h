@@ -66,6 +66,7 @@ public:
 class OverflowingBinaryOperator : public Operator {
 public:
   enum {
+    AnyWrap        = 0,
     NoUnsignedWrap = (1 << 0),
     NoSignedWrap   = (1 << 1)
   };
@@ -394,8 +395,12 @@ public:
       return true;
     case Instruction::PHI:
     case Instruction::Select:
-    case Instruction::Call:
-      return V->getType()->isFPOrFPVectorTy();
+    case Instruction::Call: {
+      Type *Ty = V->getType();
+      while (ArrayType *ArrTy = dyn_cast<ArrayType>(Ty))
+        Ty = ArrTy->getElementType();
+      return Ty->isFPOrFPVectorTy();
+    }
     default:
       return false;
     }
@@ -591,6 +596,25 @@ public:
 
   Type *getDestTy() const {
     return getType();
+  }
+};
+
+class AddrSpaceCastOperator
+    : public ConcreteOperator<Operator, Instruction::AddrSpaceCast> {
+  friend class AddrSpaceCastInst;
+  friend class ConstantExpr;
+
+public:
+  Value *getPointerOperand() { return getOperand(0); }
+
+  const Value *getPointerOperand() const { return getOperand(0); }
+
+  unsigned getSrcAddressSpace() const {
+    return getPointerOperand()->getType()->getPointerAddressSpace();
+  }
+
+  unsigned getDestAddressSpace() const {
+    return getType()->getPointerAddressSpace();
   }
 };
 

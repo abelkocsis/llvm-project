@@ -1,4 +1,9 @@
-# See www/CMake.html for instructions on how to build libcxx with CMake.
+# See https://libcxx.llvm.org/docs/BuildingLibcxx.html for instructions on how
+# to build libcxx with CMake.
+
+if (NOT IS_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/../libcxxabi")
+  message(FATAL_ERROR "libc++ now requires being built in a monorepo layout with libcxxabi available")
+endif()
 
 #===============================================================================
 # Setup Project
@@ -27,7 +32,7 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR OR LIBCXX_STANDALONE_BUIL
   project(libcxx CXX C)
 
   set(PACKAGE_NAME libcxx)
-  set(PACKAGE_VERSION 10.0.0svn)
+  set(PACKAGE_VERSION 11.0.0git)
   set(PACKAGE_STRING "${PACKAGE_NAME} ${PACKAGE_VERSION}")
   set(PACKAGE_BUGREPORT "llvm-bugs@lists.llvm.org")
 
@@ -144,45 +149,19 @@ set(LIBCXX_LIBCPPABI_VERSION "2" CACHE STRING "Version of libc++abi's ABI to re-
                                                Note that this is not related to the version of libc++'s ABI itself!")
 
 # ABI Library options ---------------------------------------------------------
-set(LIBCXX_CXX_ABI "default" CACHE STRING
-    "Specify C++ ABI library to use.")
+set(LIBCXX_CXX_ABI "default" CACHE STRING "Specify C++ ABI library to use.")
 set(CXXABIS none default libcxxabi libcxxrt libstdc++ libsupc++ vcruntime)
 set_property(CACHE LIBCXX_CXX_ABI PROPERTY STRINGS ;${CXXABIS})
 
-# FIXME: This is a temporary hack to get the buildbots working while D63883 is in flight.
-# Without this all the bots fail while building libc++
-if (DEFINED ENV{USER})
-  if (("$ENV{USER}" STREQUAL "buildbot") OR (("$ENV{USER}" STREQUAL "llvmbb") OR ("$ENV{USER}" STREQUAL "buildslave")))
-    if (LIBCXX_CXX_ABI STREQUAL "libcxxabi" AND NOT DEFINED LIBCXX_CXX_ABI_INCLUDE_PATHS)
-      message(WARNING "OVERRIDING BUILDBOT CONFIG")
-      set(LIBCXX_CXX_ABI "default" CACHE STRING "FIXME" FORCE)
-    endif()
-  endif()
-endif()
 # Setup the default options if LIBCXX_CXX_ABI is not specified.
 if (LIBCXX_CXX_ABI STREQUAL "default")
-  find_path(
-    LIBCXX_LIBCXXABI_INCLUDES_INTERNAL cxxabi.h
-    PATHS ${LLVM_MAIN_SRC_DIR}/projects/libcxxabi/include
-          ${LLVM_MAIN_SRC_DIR}/runtimes/libcxxabi/include
-          ${LLVM_MAIN_SRC_DIR}/../libcxxabi/include
-    NO_DEFAULT_PATH
-    NO_CMAKE_FIND_ROOT_PATH
-  )
   if (LIBCXX_TARGETING_MSVC)
     # FIXME: Figure out how to configure the ABI library on Windows.
     set(LIBCXX_CXX_ABI_LIBNAME "vcruntime")
-  elseif ((NOT LIBCXX_STANDALONE_BUILD OR HAVE_LIBCXXABI) AND
-          IS_DIRECTORY "${LIBCXX_LIBCXXABI_INCLUDES_INTERNAL}")
-    set(LIBCXX_CXX_ABI_LIBNAME "libcxxabi")
-    set(LIBCXX_CXX_ABI_INCLUDE_PATHS "${LIBCXX_LIBCXXABI_INCLUDES_INTERNAL}")
-    set(LIBCXX_CXX_ABI_INTREE 1)
-  elseif (APPLE)
-    set(LIBCXX_CXX_ABI_LIBNAME "libcxxabi")
-    set(LIBCXX_CXX_ABI_SYSTEM 1)
   elseif (${CMAKE_SYSTEM_NAME} MATCHES "FreeBSD")
     set(LIBCXX_CXX_ABI_LIBNAME "libcxxrt")
-    set(LIBCXX_CXX_ABI_INCLUDE_PATHS "/usr/include/c++/v1")
+  elseif (NOT LIBCXX_STANDALONE_BUILD OR HAVE_LIBCXXABI)
+    set(LIBCXX_CXX_ABI_LIBNAME "libcxxabi")
   else()
     set(LIBCXX_CXX_ABI_LIBNAME "default")
   endif()
@@ -228,7 +207,6 @@ option(LIBCXX_ENABLE_NEW_DELETE_DEFINITIONS
 # Build libc++abi with libunwind. We need this option to determine whether to
 # link with libunwind or libgcc_s while running the test cases.
 option(LIBCXXABI_USE_LLVM_UNWINDER "Build and use the LLVM unwinder." OFF)
-option(LIBCXXABI_ENABLE_STATIC_UNWINDER "Statically link the LLVM unwinder." OFF)
 
 # Target options --------------------------------------------------------------
 option(LIBCXX_BUILD_32_BITS "Build 32 bit libc++." ${LLVM_BUILD_32_BITS})
@@ -518,22 +496,13 @@ remove_flags(-Wno-pedantic -pedantic-errors -pedantic)
 
 # Required flags ==============================================================
 function(cxx_add_basic_build_flags target)
-  if (LIBCXX_HAS_MUSL_LIBC OR LIBCXX_TARGETING_CLANG_CL)
-    # musl's pthread implementations uses volatile types in their structs which is
-    # not a constexpr in C++11 but is in C++14, so we use C++14 with musl.
-    set(LIBCXX_STANDARD_VER c++14 CACHE STRING "internal option to change build dialect")
-  else()
-    set(LIBCXX_STANDARD_VER c++11 CACHE STRING "internal option to change build dialect")
-  endif()
-  target_add_compile_flags_if_supported(${target} PRIVATE -std=${LIBCXX_STANDARD_VER})
-  target_add_compile_flags_if_supported(${target} PRIVATE "/std:${LIBCXX_STANDARD_VER}")
-  mangle_name("LIBCXX_SUPPORTS_STD_EQ_${LIBCXX_STANDARD_VER}_FLAG" SUPPORTS_DIALECT_NAME)
-  mangle_name("LIBCXX_SUPPORTS_STD_COLON_${LIBCXX_STANDARD_VER}_FLAG" SUPPORTS_DIALECT_NAME_MSVC)
-  if(NOT ${SUPPORTS_DIALECT_NAME} AND NOT ${SUPPORTS_DIALECT_NAME_MSVC})
-    if(NOT "${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC" AND NOT "${CMAKE_CXX_SIMULATE_ID}" STREQUAL "MSVC")
-      message(FATAL_ERROR "C++11 or greater is required but the compiler does not support ${LIBCXX_STANDARD_VER}")
-    endif()
-  endif()
+
+  # Require C++14 for all targets. C++14 is needed to ensure constant
+  # initialization for certain globals (ex global memory resources).
+  set_target_properties(${target} PROPERTIES
+    CXX_STANDARD 14
+    CXX_STANDARD_REQUIRED YES
+    CXX_EXTENSIONS NO)
 
   # On all systems the system c++ standard library headers need to be excluded.
   # MSVC only has -X, which disables all default includes; including the crt.
@@ -568,7 +537,12 @@ function(cxx_add_basic_build_flags target)
   endif()
 
   if (LIBCXX_HAS_COMMENT_LIB_PRAGMA)
-    target_compile_definitions(${target} PRIVATE -D_LIBCPP_HAS_COMMENT_LIB_PRAGMA)
+    if (LIBCXX_HAS_PTHREAD_LIB)
+      target_compile_definitions(${target} PRIVATE -D_LIBCPP_LINK_PTHREAD_LIB)
+    endif()
+    if (LIBCXX_HAS_RT_LIB)
+      target_compile_definitions(${target} PRIVATE -D_LIBCPP_LINK_RT_LIB)
+    endif()
   endif()
 endfunction()
 
@@ -703,6 +677,9 @@ function(get_sanitizer_flags OUT_VAR  USE_SANITIZER)
       endif()
     elseif (USE_SANITIZER STREQUAL "Undefined")
       append_flags(SANITIZER_FLAGS "-fsanitize=undefined -fno-sanitize=vptr,function -fno-sanitize-recover=all")
+    elseif (USE_SANITIZER STREQUAL "Address;Undefined" OR
+            USE_SANITIZER STREQUAL "Undefined;Address")
+      append_flags(SANITIZER_FLAGS "-fsanitize=address,undefined -fno-sanitize=vptr,function -fno-sanitize-recover=all")
     elseif (USE_SANITIZER STREQUAL "Thread")
       append_flags(SANITIZER_FLAGS -fsanitize=thread)
     else()
@@ -783,6 +760,10 @@ function(cxx_link_system_libraries target)
     # (e.g. `printfw`/`scanfw`)
     target_link_libraries(${target} PRIVATE iso_stdio_wide_specifiers)
   endif()
+
+  if (ANDROID AND ANDROID_PLATFORM_LEVEL LESS 21)
+    target_link_libraries(${target} PUBLIC android_support)
+  endif()
 endfunction()
 
 # Windows-related flags =======================================================
@@ -816,7 +797,7 @@ if (NOT LIBCXX_ABI_VERSION EQUAL 1)
 endif()
 if (NOT LIBCXX_ABI_NAMESPACE STREQUAL "")
   if (NOT LIBCXX_ABI_NAMESPACE MATCHES "__.*")
-    message(WARNING "LIBCXX_ABI_NAMESPACE must be a reserved identifier.")
+    message(FATAL_ERROR "LIBCXX_ABI_NAMESPACE must be a reserved identifier.")
   endif()
   if (LIBCXX_ABI_NAMESPACE MATCHES "__[0-9]+$")
     message(FATAL_ERROR "LIBCXX_ABI_NAMESPACE '${LIBCXX_ABI_NAMESPACE}' is reserved for use by libc++.")
@@ -878,9 +859,9 @@ endif()
 function(cxx_add_config_site target)
   if (LIBCXX_NEEDS_SITE_CONFIG)
     if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC" OR "${CMAKE_CXX_SIMULATE_ID}" STREQUAL "MSVC")
-      target_compile_options(${target} PUBLIC "/FI\"${site_config_path}\"")
+      target_compile_options(${target} PUBLIC /FI "${site_config_path}")
     else()
-      target_compile_options(${target} PUBLIC "-include${site_config_path}")
+      target_compile_options(${target} PUBLIC -include "${site_config_path}")
     endif()
   endif()
 endfunction()

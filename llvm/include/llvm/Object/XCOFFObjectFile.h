@@ -15,6 +15,7 @@
 
 #include "llvm/BinaryFormat/XCOFF.h"
 #include "llvm/Object/ObjectFile.h"
+#include <limits>
 
 namespace llvm {
 namespace object {
@@ -47,7 +48,26 @@ struct XCOFFFileHeader64 {
   support::ubig32_t NumberOfSymTableEntries;
 };
 
-struct XCOFFSectionHeader32 {
+template <typename T> struct XCOFFSectionHeader {
+  // Least significant 3 bits are reserved.
+  static constexpr unsigned SectionFlagsReservedMask = 0x7;
+
+  // The low order 16 bits of section flags denotes the section type.
+  static constexpr unsigned SectionFlagsTypeMask = 0xffffu;
+
+public:
+  StringRef getName() const;
+  uint16_t getSectionType() const;
+  bool isReservedSectionType() const;
+};
+
+// Explicit extern template declarations.
+struct XCOFFSectionHeader32;
+struct XCOFFSectionHeader64;
+extern template struct XCOFFSectionHeader<XCOFFSectionHeader32>;
+extern template struct XCOFFSectionHeader<XCOFFSectionHeader64>;
+
+struct XCOFFSectionHeader32 : XCOFFSectionHeader<XCOFFSectionHeader32> {
   char Name[XCOFF::NameSize];
   support::ubig32_t PhysicalAddress;
   support::ubig32_t VirtualAddress;
@@ -58,11 +78,9 @@ struct XCOFFSectionHeader32 {
   support::ubig16_t NumberOfRelocations;
   support::ubig16_t NumberOfLineNumbers;
   support::big32_t Flags;
-
-  StringRef getName() const;
 };
 
-struct XCOFFSectionHeader64 {
+struct XCOFFSectionHeader64 : XCOFFSectionHeader<XCOFFSectionHeader64> {
   char Name[XCOFF::NameSize];
   support::ubig64_t PhysicalAddress;
   support::ubig64_t VirtualAddress;
@@ -74,8 +92,6 @@ struct XCOFFSectionHeader64 {
   support::ubig32_t NumberOfLineNumbers;
   support::big32_t Flags;
   char Padding[4];
-
-  StringRef getName() const;
 };
 
 struct XCOFFSymbolEntry {
@@ -232,6 +248,9 @@ private:
   void checkSectionAddress(uintptr_t Addr, uintptr_t TableAddr) const;
 
 public:
+  static constexpr uint64_t InvalidRelocOffset =
+      std::numeric_limits<uint64_t>::max();
+
   // Interface inherited from base classes.
   void moveSymbolNext(DataRefImpl &Symb) const override;
   uint32_t getSymbolFlags(DataRefImpl Symb) const override;
@@ -263,6 +282,10 @@ public:
   relocation_iterator section_rel_end(DataRefImpl Sec) const override;
 
   void moveRelocationNext(DataRefImpl &Rel) const override;
+
+  /// \returns the relocation offset with the base address of the containing
+  /// section as zero, or InvalidRelocOffset on errors (such as a relocation
+  /// that does not refer to an address in any section).
   uint64_t getRelocationOffset(DataRefImpl Rel) const override;
   symbol_iterator getRelocationSymbol(DataRefImpl Rel) const override;
   uint64_t getRelocationType(DataRefImpl Rel) const override;

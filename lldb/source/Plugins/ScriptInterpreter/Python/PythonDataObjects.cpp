@@ -1,4 +1,4 @@
-//===-- PythonDataObjects.cpp -----------------------------------*- C++ -*-===//
+//===-- PythonDataObjects.cpp ---------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,11 +6,9 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifdef LLDB_DISABLE_PYTHON
+#include "lldb/Host/Config.h"
 
-// Python is disabled in this build
-
-#else
+#if LLDB_ENABLE_PYTHON
 
 #include "PythonDataObjects.h"
 #include "ScriptInterpreterPython.h"
@@ -60,7 +58,7 @@ Expected<std::string> python::As<std::string>(Expected<PythonObject> &&obj) {
   auto utf8 = str.AsUTF8();
   if (!utf8)
     return utf8.takeError();
-  return utf8.get();
+  return std::string(utf8.get());
 }
 
 void StructuredPythonObject::Serialize(llvm::json::OStream &s) const {
@@ -261,8 +259,7 @@ size_t PythonBytes::GetSize() const {
 
 void PythonBytes::SetBytes(llvm::ArrayRef<uint8_t> bytes) {
   const char *data = reinterpret_cast<const char *>(bytes.data());
-  PyObject *py_bytes = PyBytes_FromStringAndSize(data, bytes.size());
-  PythonObject::Reset(PyRefType::Owned, py_bytes);
+  *this = Take<PythonBytes>(PyBytes_FromStringAndSize(data, bytes.size()));
 }
 
 StructuredData::StringSP PythonBytes::CreateStructuredString() const {
@@ -486,7 +483,7 @@ int64_t PythonInteger::GetInteger() const {
 }
 
 void PythonInteger::SetInteger(int64_t value) {
-  PythonObject::Reset(PyRefType::Owned, PyLong_FromLongLong(value));
+  *this = Take<PythonInteger>(PyLong_FromLongLong(value));
 }
 
 StructuredData::IntegerSP PythonInteger::CreateStructuredInteger() const {
@@ -510,7 +507,7 @@ bool PythonBoolean::GetValue() const {
 }
 
 void PythonBoolean::SetValue(bool value) {
-  PythonObject::Reset(PyRefType::Owned, PyBool_FromLong(value));
+  *this = Take<PythonBoolean>(PyBool_FromLong(value));
 }
 
 StructuredData::BooleanSP PythonBoolean::CreateStructuredBoolean() const {
@@ -803,30 +800,12 @@ bool PythonCallable::Check(PyObject *py_obj) {
   return PyCallable_Check(py_obj);
 }
 
-PythonCallable::ArgInfo PythonCallable::GetNumInitArguments() const {
-  auto arginfo = GetInitArgInfo();
-  if (!arginfo) {
-    llvm::consumeError(arginfo.takeError());
-    return ArgInfo{};
-  }
-  return arginfo.get();
-}
-
-Expected<PythonCallable::ArgInfo> PythonCallable::GetInitArgInfo() const {
-  if (!IsValid())
-    return nullDeref();
-  auto init = As<PythonCallable>(GetAttribute("__init__"));
-  if (!init)
-    return init.takeError();
-  return init.get().GetArgInfo();
-}
-
 #if PY_MAJOR_VERSION >= 3 && PY_MINOR_VERSION >= 3
 static const char get_arg_info_script[] = R"(
 from inspect import signature, Parameter, ismethod
 from collections import namedtuple
-ArgInfo = namedtuple('ArgInfo', ['count', 'has_varargs', 'is_bound_method'])
-def get_arg_info(f):
+ArgInfo = namedtuple('ArgInfo', ['count', 'has_varargs'])
+def main(f):
     count = 0
     varargs = False
     for parameter in signature(f).parameters.values():
@@ -841,7 +820,7 @@ def get_arg_info(f):
             pass
         else:
             raise Exception(f'unknown parameter kind: {kind}')
-    return ArgInfo(count, varargs, ismethod(f))
+    return ArgInfo(count, varargs)
 )";
 #endif
 
@@ -852,45 +831,32 @@ Expected<PythonCallable::ArgInfo> PythonCallable::GetArgInfo() const {
 
 #if PY_MAJOR_VERSION >= 3 && PY_MINOR_VERSION >= 3
 
-  // this global is protected by the GIL
-  static PythonCallable get_arg_info;
-
-  if (!get_arg_info.IsValid()) {
-    PythonDictionary globals(PyInitialValue::Empty);
-
-    auto builtins = PythonModule::BuiltinsModule();
-    Error error = globals.SetItem("__builtins__", builtins);
-    if (error)
-      return std::move(error);
-    PyObject *o = PyRun_String(get_arg_info_script, Py_file_input,
-                               globals.get(), globals.get());
-    if (!o)
-      return exception();
-    Take<PythonObject>(o);
-    auto function = As<PythonCallable>(globals.GetItem("get_arg_info"));
-    if (!function)
-      return function.takeError();
-    get_arg_info = std::move(function.get());
-  }
-
-  Expected<PythonObject> pyarginfo = get_arg_info.Call(*this);
+  // no need to synchronize access to this global, we already have the GIL
+  static PythonScript get_arg_info(get_arg_info_script);
+  Expected<PythonObject> pyarginfo = get_arg_info(*this);
   if (!pyarginfo)
     return pyarginfo.takeError();
-  result.count = cantFail(As<long long>(pyarginfo.get().GetAttribute("count")));
-  result.has_varargs =
+  long long count =
+      cantFail(As<long long>(pyarginfo.get().GetAttribute("count")));
+  bool has_varargs =
       cantFail(As<bool>(pyarginfo.get().GetAttribute("has_varargs")));
-  bool is_method =
-      cantFail(As<bool>(pyarginfo.get().GetAttribute("is_bound_method")));
-  result.max_positional_args =
-      result.has_varargs ? ArgInfo::UNBOUNDED : result.count;
-
-  // FIXME emulate old broken behavior
-  if (is_method)
-    result.count++;
+  result.max_positional_args = has_varargs ? ArgInfo::UNBOUNDED : count;
 
 #else
+  PyObject *py_func_obj;
   bool is_bound_method = false;
-  PyObject *py_func_obj = m_py_obj;
+  bool is_class = false;
+
+  if (PyType_Check(m_py_obj) || PyClass_Check(m_py_obj)) {
+    auto init = GetAttribute("__init__");
+    if (!init)
+      return init.takeError();
+    py_func_obj = init.get().get();
+    is_class = true;
+  } else {
+    py_func_obj = m_py_obj;
+  }
+
   if (PyMethod_Check(py_func_obj)) {
     py_func_obj = PyMethod_GET_FUNCTION(py_func_obj);
     PythonObject im_self = GetAttributeValue("im_self");
@@ -919,11 +885,11 @@ Expected<PythonCallable::ArgInfo> PythonCallable::GetArgInfo() const {
   if (!code)
     return result;
 
-  result.count = code->co_argcount;
-  result.has_varargs = !!(code->co_flags & CO_VARARGS);
-  result.max_positional_args = result.has_varargs
-                                   ? ArgInfo::UNBOUNDED
-                                   : (result.count - (int)is_bound_method);
+  auto count = code->co_argcount;
+  bool has_varargs = !!(code->co_flags & CO_VARARGS);
+  result.max_positional_args =
+      has_varargs ? ArgInfo::UNBOUNDED
+                  : (count - (int)is_bound_method) - (int)is_class;
 
 #endif
 
@@ -932,15 +898,6 @@ Expected<PythonCallable::ArgInfo> PythonCallable::GetArgInfo() const {
 
 constexpr unsigned
     PythonCallable::ArgInfo::UNBOUNDED; // FIXME delete after c++17
-
-PythonCallable::ArgInfo PythonCallable::GetNumArguments() const {
-  auto arginfo = GetArgInfo();
-  if (!arginfo) {
-    llvm::consumeError(arginfo.takeError());
-    return ArgInfo{};
-  }
-  return arginfo.get();
-}
 
 PythonObject PythonCallable::operator()() {
   return PythonObject(PyRefType::Owned, PyObject_CallObject(m_py_obj, nullptr));
@@ -1054,6 +1011,44 @@ void PythonException::log(llvm::raw_ostream &OS) const { OS << toCString(); }
 
 std::error_code PythonException::convertToErrorCode() const {
   return llvm::inconvertibleErrorCode();
+}
+
+bool PythonException::Matches(PyObject *exc) const {
+  return PyErr_GivenExceptionMatches(m_exception_type, exc);
+}
+
+const char read_exception_script[] = R"(
+import sys
+from traceback import print_exception
+if sys.version_info.major < 3:
+  from StringIO import StringIO
+else:
+  from io import StringIO
+def main(exc_type, exc_value, tb):
+  f = StringIO()
+  print_exception(exc_type, exc_value, tb, file=f)
+  return f.getvalue()
+)";
+
+std::string PythonException::ReadBacktrace() const {
+
+  if (!m_traceback)
+    return toCString();
+
+  // no need to synchronize access to this global, we already have the GIL
+  static PythonScript read_exception(read_exception_script);
+
+  Expected<std::string> backtrace = As<std::string>(
+      read_exception(m_exception_type, m_exception, m_traceback));
+
+  if (!backtrace) {
+    std::string message =
+        std::string(toCString()) + "\n" +
+        "Traceback unavailble, an error occurred while reading it:\n";
+    return (message + llvm::toString(backtrace.takeError()));
+  }
+
+  return std::move(backtrace.get());
 }
 
 char PythonException::ID = 0;
@@ -1367,11 +1362,13 @@ llvm::Expected<FileSP> PythonFile::ConvertToFile(bool borrowed) {
   if (!options)
     return options.takeError();
 
-  // LLDB and python will not share I/O buffers.  We should probably
-  // flush the python buffers now.
-  auto r = CallMethod("flush");
-  if (!r)
-    return r.takeError();
+  if (options.get() & File::eOpenOptionWrite) {
+    // LLDB and python will not share I/O buffers.  We should probably
+    // flush the python buffers now.
+    auto r = CallMethod("flush");
+    if (!r)
+      return r.takeError();
+  }
 
   FileSP file_sp;
   if (borrowed) {
@@ -1480,20 +1477,94 @@ Expected<PythonFile> PythonFile::FromFile(File &file, const char *mode) {
   PyObject *file_obj;
 #if PY_MAJOR_VERSION >= 3
   file_obj = PyFile_FromFd(file.GetDescriptor(), nullptr, mode, -1, nullptr,
-                           "ignore", nullptr, 0);
+                           "ignore", nullptr, /*closefd=*/0);
 #else
-  // Read through the Python source, doesn't seem to modify these strings
-  char *cmode = const_cast<char *>(mode);
-  // We pass ::flush instead of ::fclose here so we borrow the FILE* --
-  // the lldb_private::File still owns it.
-  file_obj =
-      PyFile_FromFile(file.GetStream(), const_cast<char *>(""), cmode, ::fflush);
+  // I'd like to pass ::fflush here if the file is writable,  so that
+  // when the python side destructs the file object it will be flushed.
+  // However, this would be dangerous.    It can cause fflush to be called
+  // after fclose if the python program keeps a reference to the file after
+  // the original lldb_private::File has been destructed.
+  //
+  // It's all well and good to ask a python program not to use a closed file
+  // but asking a python program to make sure objects get released in a
+  // particular order is not safe.
+  //
+  // The tradeoff here is that if a python 2 program wants to make sure this
+  // file gets flushed, they'll have to do it explicitly or wait untill the
+  // original lldb File itself gets flushed.
+  file_obj = PyFile_FromFile(file.GetStream(), py2_const_cast(""),
+                             py2_const_cast(mode), [](FILE *) { return 0; });
 #endif
 
   if (!file_obj)
     return exception();
 
   return Take<PythonFile>(file_obj);
+}
+
+Error PythonScript::Init() {
+  if (function.IsValid())
+    return Error::success();
+
+  PythonDictionary globals(PyInitialValue::Empty);
+  auto builtins = PythonModule::BuiltinsModule();
+  if (Error error = globals.SetItem("__builtins__", builtins))
+    return error;
+  PyObject *o =
+      PyRun_String(script, Py_file_input, globals.get(), globals.get());
+  if (!o)
+    return exception();
+  Take<PythonObject>(o);
+  auto f = As<PythonCallable>(globals.GetItem("main"));
+  if (!f)
+    return f.takeError();
+  function = std::move(f.get());
+
+  return Error::success();
+}
+
+llvm::Expected<PythonObject>
+python::runStringOneLine(const llvm::Twine &string,
+                         const PythonDictionary &globals,
+                         const PythonDictionary &locals) {
+  if (!globals.IsValid() || !locals.IsValid())
+    return nullDeref();
+
+  PyObject *code =
+      Py_CompileString(NullTerminated(string), "<string>", Py_eval_input);
+  if (!code) {
+    PyErr_Clear();
+    code =
+        Py_CompileString(NullTerminated(string), "<string>", Py_single_input);
+  }
+  if (!code)
+    return exception();
+  auto code_ref = Take<PythonObject>(code);
+
+#if PY_MAJOR_VERSION < 3
+  PyObject *result =
+      PyEval_EvalCode((PyCodeObject *)code, globals.get(), locals.get());
+#else
+  PyObject *result = PyEval_EvalCode(code, globals.get(), locals.get());
+#endif
+
+  if (!result)
+    return exception();
+
+  return Take<PythonObject>(result);
+}
+
+llvm::Expected<PythonObject>
+python::runStringMultiLine(const llvm::Twine &string,
+                           const PythonDictionary &globals,
+                           const PythonDictionary &locals) {
+  if (!globals.IsValid() || !locals.IsValid())
+    return nullDeref();
+  PyObject *result = PyRun_String(NullTerminated(string), Py_file_input,
+                                  globals.get(), locals.get());
+  if (!result)
+    return exception();
+  return Take<PythonObject>(result);
 }
 
 #endif
