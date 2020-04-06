@@ -29,7 +29,7 @@ public:
 
 int main(void) {
   signal(SIGUSR1, handler);
-  // CHECK-MESSAGES: :[[@LINE-1]]:3: warning: singal function should not be called in a multithreaded program [bugprone-signal-in-multithreaded-program]
+  // CHECK-MESSAGES: :[[@LINE-1]]:3: warning: signal function should not be called in a multithreaded program [bugprone-signal-in-multithreaded-program]
 
   std::thread threadObj(threadFunction);
 

@@ -31,14 +31,12 @@ void SignalInMultithreadedProgramCheck::storeOptions(
 }
 
 void SignalInMultithreadedProgramCheck::registerMatchers(MatchFinder *Finder) {
-  auto threadCall = anyOf(
-      hasDescendant(
-          callExpr(ignoringImpCasts(hasDescendant(declRefExpr(hasDeclaration(
-                       functionDecl(hasAnyListedName(ThreadList)))))))
-              .bind("thread")),
-      hasDescendant(varDecl(hasType(recordDecl(hasName("std::thread")))))
+  auto threadCall =
+      anyOf(hasDescendant(callExpr(ignoringImpCasts(hasDescendant(declRefExpr(
+                hasDeclaration(functionDecl(hasAnyListedName(ThreadList)))))))),
+            hasDescendant(varDecl(hasType(recordDecl(hasName("std::thread")))))
 
-  );
+      );
   Finder->addMatcher(
       callExpr(
           ignoringImpCasts(hasDescendant(declRefExpr(hasDeclaration(
@@ -53,7 +51,7 @@ void SignalInMultithreadedProgramCheck::check(
     const MatchFinder::MatchResult &Result) {
   const auto *MatchedSignal = Result.Nodes.getNodeAs<CallExpr>("signal");
   diag(MatchedSignal->getExprLoc(),
-       "singal function should not be called in a multithreaded program");
+       "signal function should not be called in a multithreaded program");
 }
 
 } // namespace bugprone
