@@ -114,6 +114,14 @@ New checks
   Finds function calls where it is possible to cause a not null-terminated
   result.
 
+- New :doc:`bugprone-signal-in-multithreaded-program
+  <clang-tidy/checks/bugprone-signal-in-multithreaded-program>` check.
+
+  Finds ``signal`` function calls when the program is multithreaded. It
+  founds a program multithreaded when it finds at least one function call
+  of the following: ``thrd_create``, ``std::thread``, ``boost::thread``,
+  ``pthread_t``.
+
 - New :doc:`bugprone-signed-char-misuse
   <clang-tidy/checks/bugprone-signed-char-misuse>` check.
 
@@ -212,6 +220,11 @@ New aliases
   <clang-tidy/checks/cert-con36-c>` to
   :doc:`bugprone-spuriously-wake-up-functions
   <clang-tidy/checks/bugprone-spuriously-wake-up-functions>` was added.
+
+- New alias :doc:`cert-con37-c
+  <clang-tidy/checks/cert-con37-c>` to
+  :doc:`bugprone-signal-in-multithreaded-program
+  <clang-tidy/checks/bugprone-signal-in-multithreaded-program>` was added.
 
 - New alias :doc:`cert-con54-cpp
   <clang-tidy/checks/cert-con54-cpp>` to

@@ -11,6 +11,7 @@
 #include "../ClangTidyModuleRegistry.h"
 #include "../bugprone/UnhandledSelfAssignmentCheck.h"
 #include "../bugprone/BadSignalToKillThreadCheck.h"
+#include "../bugprone/SignalInMultithreadedProgramCheck.h"
 #include "../bugprone/SpuriouslyWakeUpFunctionsCheck.h"
 #include "../google/UnnamedNamespaceInHeaderCheck.h"
 #include "../misc/NewDeleteOverloadsCheck.h"
@@ -79,6 +80,8 @@ public:
 
     // C checkers
     // CON
+    CheckFactories.registerCheck<bugprone::SignalInMultithreadedProgramCheck>(
+        "cert-con37-c");
     CheckFactories.registerCheck<bugprone::SpuriouslyWakeUpFunctionsCheck>(
         "cert-con36-c");
     // DCL

@@ -71,6 +71,7 @@ Clang-Tidy Checks
    `bugprone-not-null-terminated-result <bugprone-not-null-terminated-result.html>`_, "Yes"
    `bugprone-parent-virtual-call <bugprone-parent-virtual-call.html>`_, "Yes"
    `bugprone-posix-return <bugprone-posix-return.html>`_, "Yes"
+   `bugprone-signal-in-multithreaded-program <bugprone-signal-in-multithreaded-program.html>`_,
    `bugprone-signed-char-misuse <bugprone-signed-char-misuse.html>`_,
    `bugprone-sizeof-container <bugprone-sizeof-container.html>`_,
    `bugprone-sizeof-expression <bugprone-sizeof-expression.html>`_,
@@ -94,6 +95,7 @@ Clang-Tidy Checks
    `bugprone-unused-return-value <bugprone-unused-return-value.html>`_,
    `bugprone-use-after-move <bugprone-use-after-move.html>`_,
    `bugprone-virtual-near-miss <bugprone-virtual-near-miss.html>`_, "Yes"
+   `cert-con37-c <cert-con37-c.html>`_,
    `cert-dcl21-cpp <cert-dcl21-cpp.html>`_,
    `cert-dcl50-cpp <cert-dcl50-cpp.html>`_,
    `cert-dcl58-cpp <cert-dcl58-cpp.html>`_,
@@ -295,6 +297,7 @@ Clang-Tidy Checks
    :header: "Name", "Redirect", "Offers fixes"
 
    `cert-con36-c <cert-con36-c.html>`_, `bugprone-spuriously-wake-up-functions <bugprone-spuriously-wake-up-functions.html>`_,
+   `cert-con37-c <cert-con37-c.html>`_, `bugprone-signal-in-multithreaded-program <bugprone-signal-in-multithreaded-program.html>`_,
    `cert-con54-cpp <cert-con54-cpp.html>`_, `bugprone-spuriously-wake-up-functions <bugprone-spuriously-wake-up-functions.html>`_,
    `cert-dcl03-c <cert-dcl03-c.html>`_, `misc-static-assert <misc-static-assert.html>`_, "Yes"
    `cert-dcl16-c <cert-dcl16-c.html>`_, `readability-uppercase-literal-suffix <readability-uppercase-literal-suffix.html>`_, "Yes"
