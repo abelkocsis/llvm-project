@@ -120,6 +120,14 @@ New checks
   Finds ``signed char`` to integer conversions which might indicate a
   programming error.
 
+- New :doc:`bugprone-spuriously-wake-up-functions
+  <clang-tidy/checks/bugprone-spuriously-wake-up-functions>` check.
+
+  Finds ``cnd_wait``, ``cnd_timedwait``, ``wait``, ``wait_for``, or
+  ``wait_until`` function calls when the function is not invoked from a loop
+  that checks whether a condition predicate holds or the function has a 
+  condition parameter.
+
 - New :doc:`cert-mem57-cpp
   <clang-tidy/checks/cert-mem57-cpp>` check.
 
@@ -200,6 +208,16 @@ New checks
 New aliases
 ^^^^^^^^^^^
 
+- New alias :doc:`cert-con36-c
+  <clang-tidy/checks/cert-con36-c>` to
+  :doc:`bugprone-spuriously-wake-up-functions
+  <clang-tidy/checks/bugprone-spuriously-wake-up-functions>` was added.
+
+- New alias :doc:`cert-con54-cpp
+  <clang-tidy/checks/cert-con54-cpp>` to
+  :doc:`bugprone-spuriously-wake-up-functions
+  <clang-tidy/checks/bugprone-spuriously-wake-up-functions>` was added.
+  
 - New alias :doc:`cert-pos44-c
   <clang-tidy/checks/cert-pos44-c>` to
   :doc:`bugprone-bad-signal-to-kill-thread
