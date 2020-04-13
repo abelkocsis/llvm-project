@@ -11,6 +11,7 @@
 #include "../ClangTidyModuleRegistry.h"
 #include "../bugprone/UnhandledSelfAssignmentCheck.h"
 #include "../bugprone/BadSignalToKillThreadCheck.h"
+#include "../bugprone/DoNotReferAtomicTwiceCheck.h"
 #include "../bugprone/SignalInMultithreadedProgramCheck.h"
 #include "../bugprone/SpuriouslyWakeUpFunctionsCheck.h"
 #include "../google/UnnamedNamespaceInHeaderCheck.h"
@@ -84,6 +85,8 @@ public:
         "cert-con37-c");
     CheckFactories.registerCheck<bugprone::SpuriouslyWakeUpFunctionsCheck>(
         "cert-con36-c");
+    CheckFactories.registerCheck<bugprone::DoNotReferAtomicTwiceCheck>(
+        "cert-con40-c");
     // DCL
     CheckFactories.registerCheck<misc::StaticAssertCheck>("cert-dcl03-c");
     CheckFactories.registerCheck<readability::UppercaseLiteralSuffixCheck>(

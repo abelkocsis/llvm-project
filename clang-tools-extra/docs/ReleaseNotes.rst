@@ -96,6 +96,11 @@ New checks
   Finds ``pthread_kill`` function calls when a thread is terminated by
   raising ``SIGTERM`` signal.
 
+- New :doc:`bugprone-do-not-refer-atomic-twice
+  <clang-tidy/checks/bugprone-do-not-refer-atomic-twice>` check.
+
+  Finds atomic variable which is referred twice in an expression.
+
 - New :doc:`bugprone-dynamic-static-initializers
   <clang-tidy/checks/bugprone-dynamic-static-initializers>` check.
 
@@ -225,6 +230,11 @@ New aliases
   <clang-tidy/checks/cert-con37-c>` to
   :doc:`bugprone-signal-in-multithreaded-program
   <clang-tidy/checks/bugprone-signal-in-multithreaded-program>` was added.
+
+- New alias :doc:`cert-con40-c
+  <clang-tidy/checks/cert-con40-c>` to
+  :doc:`bugprone-do-not-refer-atomic-twice
+  <clang-tidy/checks/bugprone-do-not-refer-atomic-twice>` was added.
 
 - New alias :doc:`cert-con54-cpp
   <clang-tidy/checks/cert-con54-cpp>` to

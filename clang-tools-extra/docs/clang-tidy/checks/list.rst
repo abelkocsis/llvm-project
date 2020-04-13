@@ -52,6 +52,7 @@ Clang-Tidy Checks
    `bugprone-branch-clone <bugprone-branch-clone.html>`_,
    `bugprone-copy-constructor-init <bugprone-copy-constructor-init.html>`_, "Yes"
    `bugprone-dangling-handle <bugprone-dangling-handle.html>`_,
+   `bugprone-do-not-refer-atomic-twice <bugprone-do-not-refer-atomic-twice.html>`_,
    `bugprone-dynamic-static-initializers <bugprone-dynamic-static-initializers.html>`_,
    `bugprone-exception-escape <bugprone-exception-escape.html>`_,
    `bugprone-fold-init-type <bugprone-fold-init-type.html>`_,
@@ -295,9 +296,9 @@ Clang-Tidy Checks
 
 .. csv-table:: Aliases..
    :header: "Name", "Redirect", "Offers fixes"
-
    `cert-con36-c <cert-con36-c.html>`_, `bugprone-spuriously-wake-up-functions <bugprone-spuriously-wake-up-functions.html>`_,
    `cert-con37-c <cert-con37-c.html>`_, `bugprone-signal-in-multithreaded-program <bugprone-signal-in-multithreaded-program.html>`_,
+   `cert-con40-c <cert-con37-c.html>`_, `bugprone-do-not-refer-atomic-twice <bugprone-do-not-refer-atomic-twice.html>`_,
    `cert-con54-cpp <cert-con54-cpp.html>`_, `bugprone-spuriously-wake-up-functions <bugprone-spuriously-wake-up-functions.html>`_,
    `cert-dcl03-c <cert-dcl03-c.html>`_, `misc-static-assert <misc-static-assert.html>`_, "Yes"
    `cert-dcl16-c <cert-dcl16-c.html>`_, `readability-uppercase-literal-suffix <readability-uppercase-literal-suffix.html>`_, "Yes"
