@@ -103,10 +103,10 @@ New checks
 - New :doc:`bugprone-signal-in-multithreaded-program
   <clang-tidy/checks/bugprone-signal-in-multithreaded-program>` check.
 
-  Finds ``signal`` function calls when the program is multithreaded. It
-  founds a program multithreaded when it finds at least one function call
-  of the following: ``thrd_create``, ``std::thread``, ``boost::thread``,
-  ``pthread_t``.
+  Finds ``signal`` function calls when the program is multithreaded. The
+  check considers the analyzed program multithreaded if it finds at least
+  one function call of the following: ``thrd_create``, ``std::thread``, 
+  ``boost::thread``, ``pthread_t``.
 
 - New :doc:`bugprone-suspicious-include
   <clang-tidy/checks/bugprone-suspicious-include>` check.
