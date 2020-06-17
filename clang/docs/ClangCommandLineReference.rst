@@ -1331,6 +1331,10 @@ Restrict code to those available for App Extensions
 
 .. option:: -fautolink, -fno-autolink
 
+.. option:: -fbasic-block-sections=labels, -fbasic-block-sections=all, -fbasic-block-sections=list=<arg>, -fbasic-block-sections=none
+
+Generate labels for each basic block or place each basic block or a subset of basic blocks in its own section.
+
 .. option:: -fblocks, -fno-blocks
 
 Enable the 'blocks' language feature
@@ -2735,6 +2739,8 @@ Specify bit size of immediate TLS offsets (AArch64 ELF only): 12 (for 4KB) \| 24
 .. option:: -mtune=<arg>
 .. program:: clang
 
+Accepted for compatibility with GCC. Currently has no effect.
+
 .. option:: -mtvos-version-min=<arg>, -mappletvos-version-min=<arg>
 
 .. option:: -municode<arg>
@@ -2973,6 +2979,11 @@ Enable MT ASE (MIPS only)
 
 PowerPC
 -------
+.. option:: -maix-struct-return
+
+Override the default ABI for 32-bit targets to return all structs in memory,
+as in the Power 32-bit ABI for Linux (2011), and on AIX and Darwin.
+
 .. option:: -maltivec, -mno-altivec
 
 .. option:: -mcmpb, -mno-cmpb
@@ -3009,6 +3020,11 @@ PowerPC
 
 .. option:: -mspe, -mno-spe
 
+.. option:: -msvr4-struct-return
+
+Override the default ABI for 32-bit targets to return small structs in
+registers, as in the System V ABI (1995).
+
 .. option:: -mvsx, -mno-vsx
 
 WebAssembly
@@ -3034,6 +3050,12 @@ WebAssembly
 .. option:: -mtail-call, -mno-tail-call
 
 .. option:: -munimplemented-simd128, -mno-unimplemented-simd128
+
+.. option:: -mexec-model=<arg>
+
+Select between "command" and "reactor" executable models. Commands have a main
+function which scopes the lifetime of the program. Reactors are activated and
+remain active until explicitly terminated.
 
 X86
 ---
@@ -3174,6 +3196,8 @@ X86
 .. option:: -mssse3, -mno-ssse3
 
 .. option:: -mtbm, -mno-tbm
+
+.. option:: -mtsxldtrk, -mno-tsxldtrk
 
 .. option:: -mvaes, -mno-vaes
 

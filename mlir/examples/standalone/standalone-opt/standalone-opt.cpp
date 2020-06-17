@@ -46,6 +46,11 @@ static llvm::cl::opt<bool> verifyPasses(
     llvm::cl::desc("Run the verifier after each transformation pass"),
     llvm::cl::init(true));
 
+static llvm::cl::opt<bool> allowUnregisteredDialects(
+    "allow-unregistered-dialect",
+    llvm::cl::desc("Allow operation with no registered dialects"),
+    llvm::cl::init(false));
+
 static llvm::cl::opt<bool>
     showDialects("show-dialects",
                  llvm::cl::desc("Print the list of registered dialects"),
@@ -68,8 +73,8 @@ int main(int argc, char **argv) {
   llvm::cl::ParseCommandLineOptions(argc, argv,
                                     "MLIR modular optimizer driver\n");
 
-  mlir::MLIRContext context;
   if (showDialects) {
+    mlir::MLIRContext context;
     llvm::outs() << "Registered Dialects:\n";
     for (mlir::Dialect *dialect : context.getRegisteredDialects()) {
       llvm::outs() << dialect->getNamespace() << "\n";
@@ -91,7 +96,12 @@ int main(int argc, char **argv) {
     exit(1);
   }
 
-  return failed(mlir::MlirOptMain(output->os(), std::move(file), passPipeline,
-                                  splitInputFile, verifyDiagnostics,
-                                  verifyPasses));
+  if (failed(MlirOptMain(output->os(), std::move(file), passPipeline,
+                         splitInputFile, verifyDiagnostics, verifyPasses,
+                         allowUnregisteredDialects))) {
+    return 1;
+  }
+  // Keep the output file if the invocation of MlirOptMain was successful.
+  output->keep();
+  return 0;
 }

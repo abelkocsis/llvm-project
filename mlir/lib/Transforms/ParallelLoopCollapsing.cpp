@@ -6,9 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "mlir/Dialect/LoopOps/LoopOps.h"
-#include "mlir/Dialect/StandardOps/IR/Ops.h"
-#include "mlir/Pass/Pass.h"
+#include "PassDetail.h"
+#include "mlir/Dialect/SCF/SCF.h"
 #include "mlir/Transforms/LoopUtils.h"
 #include "mlir/Transforms/Passes.h"
 #include "mlir/Transforms/RegionUtils.h"
@@ -20,17 +19,12 @@
 using namespace mlir;
 
 namespace {
-struct ParallelLoopCollapsing : public OperationPass<ParallelLoopCollapsing> {
-/// Include the generated pass utilities.
-#define GEN_PASS_ParallelLoopCollapsing
-#include "mlir/Transforms/Passes.h.inc"
-
-  ParallelLoopCollapsing() = default;
-  ParallelLoopCollapsing(const ParallelLoopCollapsing &) {}
+struct ParallelLoopCollapsing
+    : public ParallelLoopCollapsingBase<ParallelLoopCollapsing> {
   void runOnOperation() override {
     Operation *module = getOperation();
 
-    module->walk([&](loop::ParallelOp op) {
+    module->walk([&](scf::ParallelOp op) {
       // The common case for GPU dialect will be simplifying the ParallelOp to 3
       // arguments, so we do that here to simplify things.
       llvm::SmallVector<std::vector<unsigned>, 3> combinedLoops;
@@ -44,7 +38,6 @@ struct ParallelLoopCollapsing : public OperationPass<ParallelLoopCollapsing> {
     });
   }
 };
-
 } // namespace
 
 std::unique_ptr<Pass> mlir::createParallelLoopCollapsingPass() {

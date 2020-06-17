@@ -108,6 +108,15 @@ llvm.func @copysign_test(%arg0: !llvm.float, %arg1: !llvm.float, %arg2: !llvm<"<
   llvm.return
 }
 
+// CHECK-LABEL: @pow_test
+llvm.func @pow_test(%arg0: !llvm.float, %arg1: !llvm.float, %arg2: !llvm<"<8 x float>">, %arg3: !llvm<"<8 x float>">) {
+  // CHECK: call float @llvm.pow.f32
+  "llvm.intr.pow"(%arg0, %arg1) : (!llvm.float, !llvm.float) -> !llvm.float
+  // CHECK: call <8 x float> @llvm.pow.v8f32
+  "llvm.intr.pow"(%arg2, %arg3) : (!llvm<"<8 x float>">, !llvm<"<8 x float>">) -> !llvm<"<8 x float>">
+  llvm.return
+}
+
 // CHECK-LABEL: @vector_reductions
 llvm.func @vector_reductions(%arg0: !llvm.float, %arg1: !llvm<"<8 x float>">, %arg2: !llvm<"<8 x i32>">) {
   // CHECK: call i32 @llvm.experimental.vector.reduce.add.v8i32
@@ -200,7 +209,7 @@ llvm.func @masked_intrinsics(%A: !llvm<"<7 x float>*">, %mask: !llvm<"<7 x i1>">
 // CHECK-DAG: declare float @llvm.copysign.f32(float, float)
 // CHECK-DAG: declare <12 x float> @llvm.matrix.multiply.v12f32.v64f32.v48f32(<64 x float>, <48 x float>, i32 immarg, i32 immarg, i32 immarg)
 // CHECK-DAG: declare <48 x float> @llvm.matrix.transpose.v48f32(<48 x float>, i32 immarg, i32 immarg)
-// CHECK-DAG: declare <48 x float> @llvm.matrix.columnwise.load.v48f32.p0f32(float*, i32, i32 immarg, i32 immarg)
-// CHECK-DAG: declare void @llvm.matrix.columnwise.store.v48f32.p0f32(<48 x float>, float* writeonly, i32, i32 immarg, i32 immarg)
+// CHECK-DAG: declare <48 x float> @llvm.matrix.columnwise.load.v48f32.p0f32(float* nocapture, i32, i32 immarg, i32 immarg)
+// CHECK-DAG: declare void @llvm.matrix.columnwise.store.v48f32.p0f32(<48 x float>, float* nocapture writeonly, i32, i32 immarg, i32 immarg)
 // CHECK-DAG: declare <7 x float> @llvm.masked.load.v7f32.p0v7f32(<7 x float>*, i32 immarg, <7 x i1>, <7 x float>)
 // CHECK-DAG: declare void @llvm.masked.store.v7f32.p0v7f32(<7 x float>, <7 x float>*, i32 immarg, <7 x i1>)

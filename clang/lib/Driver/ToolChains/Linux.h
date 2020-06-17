@@ -31,6 +31,8 @@ public:
       llvm::opt::ArgStringList &CC1Args) const override;
   void AddCudaIncludeArgs(const llvm::opt::ArgList &DriverArgs,
                           llvm::opt::ArgStringList &CC1Args) const override;
+  void AddHIPIncludeArgs(const llvm::opt::ArgList &DriverArgs,
+                         llvm::opt::ArgStringList &CC1Args) const override;
   void AddIAMCUIncludeArgs(const llvm::opt::ArgList &DriverArgs,
                            llvm::opt::ArgStringList &CC1Args) const override;
   CXXStdlibType GetDefaultCXXStdlibType() const override;
@@ -49,9 +51,8 @@ public:
   std::vector<std::string> ExtraOpts;
 
   llvm::DenormalMode getDefaultDenormalModeForType(
-    const llvm::opt::ArgList &DriverArgs,
-    Action::OffloadKind DeviceOffloadKind,
-    const llvm::fltSemantics *FPType = nullptr) const override;
+      const llvm::opt::ArgList &DriverArgs, const JobAction &JA,
+      const llvm::fltSemantics *FPType = nullptr) const override;
 
 protected:
   Tool *buildAssembler() const override;

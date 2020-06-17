@@ -23,7 +23,6 @@ namespace llvm {
   struct fltSemantics;
   class MachineFunction;
   class MemoryBuffer;
-  class Module;
 
   namespace FloatABI {
     enum ABIType {
@@ -122,7 +121,7 @@ namespace llvm {
           EnableFastISel(false), EnableGlobalISel(false), UseInitArray(false),
           DisableIntegratedAS(false), RelaxELFRelocations(false),
           FunctionSections(false), DataSections(false),
-          UniqueSectionNames(true), UniqueBBSectionNames(false),
+          UniqueSectionNames(true), UniqueBasicBlockSectionNames(false),
           TrapUnreachable(false), NoTrapAfterNoreturn(false), TLSSize(0),
           EmulatedTLS(false), ExplicitEmulatedTLS(false), EnableIPRA(false),
           EmitStackSizeSection(false), EnableMachineOutliner(false),
@@ -235,7 +234,7 @@ namespace llvm {
     unsigned UniqueSectionNames : 1;
 
     /// Use unique names for basic block sections.
-    unsigned UniqueBBSectionNames : 1;
+    unsigned UniqueBasicBlockSectionNames : 1;
 
     /// Emit target-specific trap instruction for 'unreachable' IR instructions.
     unsigned TrapUnreachable : 1;

@@ -20,7 +20,7 @@
 namespace clang {
 namespace clangd {
 
-ParseInputs TestTU::inputs() const {
+ParseInputs TestTU::inputs(MockFSProvider &FSProvider) const {
   std::string FullFilename = testPath(Filename),
               FullHeaderName = testPath(HeaderFilename),
               ImportThunk = testPath("import_thunk.h");
@@ -29,13 +29,13 @@ ParseInputs TestTU::inputs() const {
   // guard without messing up offsets). In this case, use an intermediate file.
   std::string ThunkContents = "#import \"" + FullHeaderName + "\"\n";
 
-  llvm::StringMap<std::string> Files(AdditionalFiles);
-  Files[FullFilename] = Code;
-  Files[FullHeaderName] = HeaderCode;
-  Files[ImportThunk] = ThunkContents;
+  FSProvider.Files = AdditionalFiles;
+  FSProvider.Files[FullFilename] = Code;
+  FSProvider.Files[FullHeaderName] = HeaderCode;
+  FSProvider.Files[ImportThunk] = ThunkContents;
 
   ParseInputs Inputs;
-  auto& Argv = Inputs.CompileCommand.CommandLine;
+  auto &Argv = Inputs.CompileCommand.CommandLine;
   Argv = {"clang"};
   // FIXME: this shouldn't need to be conditional, but it breaks a
   // GoToDefinition test for some reason (getMacroArgExpandedLocation fails).
@@ -54,9 +54,10 @@ ParseInputs TestTU::inputs() const {
   Inputs.CompileCommand.Filename = FullFilename;
   Inputs.CompileCommand.Directory = testRoot();
   Inputs.Contents = Code;
-  Inputs.FS = buildTestFS(Files);
+  Inputs.FSProvider = &FSProvider;
   Inputs.Opts = ParseOptions();
   Inputs.Opts.BuildRecoveryAST = true;
+  Inputs.Opts.PreserveRecoveryASTType = true;
   Inputs.Opts.ClangTidyOpts.Checks = ClangTidyChecks;
   Inputs.Opts.ClangTidyOpts.WarningsAsErrors = ClangTidyWarningsAsErrors;
   Inputs.Index = ExternalIndex;
@@ -65,17 +66,28 @@ ParseInputs TestTU::inputs() const {
   return Inputs;
 }
 
+std::shared_ptr<const PreambleData> TestTU::preamble() const {
+  MockFSProvider FSProvider;
+  auto Inputs = inputs(FSProvider);
+  IgnoreDiagnostics Diags;
+  auto CI = buildCompilerInvocation(Inputs, Diags);
+  assert(CI && "Failed to build compilation invocation.");
+  return clang::clangd::buildPreamble(testPath(Filename), *CI, Inputs,
+                                      /*StoreInMemory=*/true,
+                                      /*PreambleCallback=*/nullptr);
+}
+
 ParsedAST TestTU::build() const {
-  auto Inputs = inputs();
+  MockFSProvider FSProvider;
+  auto Inputs = inputs(FSProvider);
   StoreDiags Diags;
   auto CI = buildCompilerInvocation(Inputs, Diags);
   assert(CI && "Failed to build compilation invocation.");
-  auto Preamble =
-      buildPreamble(testPath(Filename), *CI,
-                    /*OldPreamble=*/nullptr, Inputs,
-                    /*StoreInMemory=*/true, /*PreambleCallback=*/nullptr);
-  auto AST = buildAST(testPath(Filename), std::move(CI), Diags.take(), Inputs,
-                      Preamble);
+  auto Preamble = clang::clangd::buildPreamble(testPath(Filename), *CI, Inputs,
+                                               /*StoreInMemory=*/true,
+                                               /*PreambleCallback=*/nullptr);
+  auto AST = ParsedAST::build(testPath(Filename), Inputs, std::move(CI),
+                              Diags.take(), Preamble);
   if (!AST.hasValue()) {
     ADD_FAILURE() << "Failed to build code:\n" << Code;
     llvm_unreachable("Failed to build TestTU!");
@@ -89,7 +101,7 @@ ParsedAST TestTU::build() const {
     if (llvm::StringRef(Code).contains(Marker) ||
         llvm::StringRef(HeaderCode).contains(Marker))
       return true;
-    for (const auto& KV : this->AdditionalFiles)
+    for (const auto &KV : this->AdditionalFiles)
       if (llvm::StringRef(KV.second).contains(Marker))
         return true;
     return false;
@@ -114,12 +126,18 @@ SymbolSlab TestTU::headerSymbols() const {
                                         AST.getCanonicalIncludes()));
 }
 
+RefSlab TestTU::headerRefs() const {
+  auto AST = build();
+  return std::get<1>(indexMainDecls(AST));
+}
+
 std::unique_ptr<SymbolIndex> TestTU::index() const {
   auto AST = build();
   auto Idx = std::make_unique<FileIndex>(/*UseDex=*/true);
-  Idx->updatePreamble(Filename, /*Version=*/"null", AST.getASTContext(),
-                      AST.getPreprocessorPtr(), AST.getCanonicalIncludes());
-  Idx->updateMain(Filename, AST);
+  Idx->updatePreamble(testPath(Filename), /*Version=*/"null",
+                      AST.getASTContext(), AST.getPreprocessorPtr(),
+                      AST.getCanonicalIncludes());
+  Idx->updateMain(testPath(Filename), AST);
   return std::move(Idx);
 }
 

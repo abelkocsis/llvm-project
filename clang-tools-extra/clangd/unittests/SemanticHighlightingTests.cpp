@@ -115,7 +115,7 @@ void checkHighlightings(llvm::StringRef Code,
   // FIXME: Auto-completion in a template requires disabling delayed template
   // parsing.
   TU.ExtraArgs.push_back("-fno-delayed-template-parsing");
-  TU.ExtraArgs.push_back("-std=c++2a");
+  TU.ExtraArgs.push_back("-std=c++20");
 
   for (auto File : AdditionalFiles)
     TU.AdditionalFiles.insert({File.first, std::string(File.second)});
@@ -658,6 +658,20 @@ sizeof...($TemplateParameter[[Elements]]);
             ::template $DependentType[[Location]]<$TemplateParameter[[T]]>;
         static const int $StaticField[[Value]] = $TemplateParameter[[T]]
             ::$DependentType[[Resolver]]::$DependentName[[Value]];
+      };
+    )cpp",
+      // Dependent name with heuristic target
+      R"cpp(
+      template <typename>
+      struct $Class[[Foo]] {
+        int $Field[[Waldo]];
+        void $Method[[bar]]() {
+          $Class[[Foo]]().$Field[[Waldo]];
+        }
+        template <typename $TemplateParameter[[U]]>
+        void $Method[[bar1]]() {
+          $Class[[Foo]]<$TemplateParameter[[U]]>().$Field[[Waldo]];
+        }
       };
     )cpp",
       // Concepts

@@ -173,6 +173,15 @@ TEST_F(ShowSelectionTreeTest, Test) {
         *IntegerLiteral 2
 )";
   EXPECT_EQ(apply("int fcall(int); int x = fca[[ll(2 +]]2);"), Output);
+
+  Output = R"(message:
+ TranslationUnitDecl 
+   FunctionDecl void x()
+     CompoundStmt { …
+       ForStmt for (;;) …
+        *BreakStmt break;
+)";
+  EXPECT_EQ(apply("void x() { for (;;) br^eak; }"), Output);
 }
 
 TWEAK_TEST(DumpRecordLayout);
@@ -2050,21 +2059,57 @@ TEST_F(DefineOutlineTest, ApplyTest) {
           "void foo(int x, int y = 5, int = 2, int (*foo)(int) = nullptr) ;",
           "void foo(int x, int y , int , int (*foo)(int) ) {}",
       },
-      // Ctor initializers.
+      // Constructors
+      {
+          R"cpp(
+            class Foo {public: Foo(); Foo(int);};
+            class Bar {
+              Ba^r() {}
+              Bar(int x) : f1(x) {}
+              Foo f1;
+              Foo f2 = 2;
+            };)cpp",
+          R"cpp(
+            class Foo {public: Foo(); Foo(int);};
+            class Bar {
+              Bar() ;
+              Bar(int x) : f1(x) {}
+              Foo f1;
+              Foo f2 = 2;
+            };)cpp",
+          "Bar::Bar() {}\n",
+      },
+      // Ctor with initializer.
+      {
+          R"cpp(
+            class Foo {public: Foo(); Foo(int);};
+            class Bar {
+              Bar() {}
+              B^ar(int x) : f1(x), f2(3) {}
+              Foo f1;
+              Foo f2 = 2;
+            };)cpp",
+          R"cpp(
+            class Foo {public: Foo(); Foo(int);};
+            class Bar {
+              Bar() {}
+              Bar(int x) ;
+              Foo f1;
+              Foo f2 = 2;
+            };)cpp",
+          "Bar::Bar(int x) : f1(x), f2(3) {}\n",
+      },
+      // Ctor initializer with attribute.
       {
           R"cpp(
               class Foo {
-                int y = 2;
                 F^oo(int z) __attribute__((weak)) : bar(2){}
                 int bar;
-                int z = 2;
               };)cpp",
           R"cpp(
               class Foo {
-                int y = 2;
                 Foo(int z) __attribute__((weak)) ;
                 int bar;
-                int z = 2;
               };)cpp",
           "Foo::Foo(int z) __attribute__((weak)) : bar(2){}\n",
       },
@@ -2141,6 +2186,28 @@ TEST_F(DefineOutlineTest, ApplyTest) {
               void foo() final override ;
             };)cpp",
           "void B::foo()   {}\n",
+      },
+      {
+          R"cpp(
+            struct A {
+              static void fo^o() {}
+            };)cpp",
+          R"cpp(
+            struct A {
+              static void foo() ;
+            };)cpp",
+          " void A::foo() {}\n",
+      },
+      {
+          R"cpp(
+            struct A {
+              static static void fo^o() {}
+            };)cpp",
+          R"cpp(
+            struct A {
+              static static void foo() ;
+            };)cpp",
+          "  void A::foo() {}\n",
       },
   };
   for (const auto &Case : Cases) {
@@ -2232,6 +2299,24 @@ TEST_F(DefineOutlineTest, HandleMacros) {
             STUPID_MACRO(sizeof sizeof int) void f^oo() {}
           };)cpp",
        R"cpp(#define STUPID_MACRO(X) virtual
+          struct A {
+            STUPID_MACRO(sizeof sizeof int) void foo() ;
+          };)cpp",
+       " void A::foo() {}\n"},
+      {R"cpp(#define STAT static
+          struct A {
+            STAT void f^oo() {}
+          };)cpp",
+       R"cpp(#define STAT static
+          struct A {
+            STAT void foo() ;
+          };)cpp",
+       " void A::foo() {}\n"},
+      {R"cpp(#define STUPID_MACRO(X) static
+          struct A {
+            STUPID_MACRO(sizeof sizeof int) void f^oo() {}
+          };)cpp",
+       R"cpp(#define STUPID_MACRO(X) static
           struct A {
             STUPID_MACRO(sizeof sizeof int) void foo() ;
           };)cpp",
@@ -2360,8 +2445,7 @@ TEST_F(DefineOutlineTest, FailsMacroSpecifier) {
           struct A {
             VIRT fo^o() {}
           };)cpp",
-          "fail: define outline: Can't move out of line as function has a "
-          "macro `virtual` specifier."},
+          "fail: define outline: couldn't remove `virtual` keyword."},
       {
           R"cpp(
           #define OVERFINAL final override
@@ -2397,6 +2481,7 @@ TEST_F(AddUsingTest, Prepare) {
 #define NS(name) one::two::name
 namespace one {
 void oo() {}
+template<typename TT> class tt {};
 namespace two {
 enum ee {};
 void ff() {}
@@ -2404,6 +2489,7 @@ class cc {
 public:
   struct st {};
   static void mm() {}
+  cc operator|(const cc& x) const { return x; }
 };
 }
 })cpp";
@@ -2419,6 +2505,20 @@ public:
   EXPECT_UNAVAILABLE(Header +
                      "void fun() { o^n^e^:^:^t^w^o^:^:^c^c^:^:^s^t inst; }");
   EXPECT_UNAVAILABLE(Header + "void fun() { N^S(c^c) inst; }");
+  // This used to crash. Ideally we would support this case, but for now we just
+  // test that we don't crash.
+  EXPECT_UNAVAILABLE(Header +
+                     "template<typename TT> using foo = one::tt<T^T>;");
+  // Test that we don't crash or misbehave on unnamed DeclRefExpr.
+  EXPECT_UNAVAILABLE(Header +
+                     "void fun() { one::two::cc() ^| one::two::cc(); }");
+
+  // Check that we do not trigger in header files.
+  FileName = "test.h";
+  ExtraArgs.push_back("-xc++-header"); // .h file is treated a C by default.
+  EXPECT_UNAVAILABLE(Header + "void fun() { one::two::f^f(); }");
+  FileName = "test.hpp";
+  EXPECT_UNAVAILABLE(Header + "void fun() { one::two::f^f(); }");
 }
 
 TEST_F(AddUsingTest, Apply) {
@@ -2612,6 +2712,23 @@ using one::two::ff;
 
 void fun() {
   CALL(ff);
+})cpp"},
+            // Parent namespace != lexical parent namespace
+            {R"cpp(
+#include "test.hpp"
+namespace foo { void fun(); }
+
+void foo::fun() {
+  one::two::f^f();
+})cpp",
+             R"cpp(
+#include "test.hpp"
+using one::two::ff;
+
+namespace foo { void fun(); }
+
+void foo::fun() {
+  ff();
 })cpp"}};
   llvm::StringMap<std::string> EditedFiles;
   for (const auto &Case : Cases) {

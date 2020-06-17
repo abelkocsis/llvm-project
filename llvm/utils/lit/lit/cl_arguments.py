@@ -3,6 +3,7 @@ import os
 import shlex
 import sys
 
+import lit.reports
 import lit.util
 
 
@@ -57,7 +58,7 @@ def parse_args():
             help="Display all commandlines and output",
             action="store_true")
     format_group.add_argument("-o", "--output",
-            dest="output_path",
+            type=lit.reports.JsonReport,
             help="Write test results to the provided path",
             metavar="PATH")
     format_group.add_argument("--no-progress-bar",
@@ -91,7 +92,6 @@ def parse_args():
             action="append",
             default=[])
     execution_group.add_argument("--time-tests",
-            dest="timeTests",
             help="Track elapsed wall time for each test",
             action="store_true")
     execution_group.add_argument("--no-execute",
@@ -99,7 +99,7 @@ def parse_args():
             help="Don't execute any tests (assume PASS)",
             action="store_true")
     execution_group.add_argument("--xunit-xml-output",
-            dest="xunit_output_file",
+            type=lit.reports.XunitReport,
             help="Write XUnit-compatible XML test reports to the specified file")
     execution_group.add_argument("--timeout",
             dest="maxIndividualTestTime",
@@ -152,12 +152,13 @@ def parse_args():
             help="Enable debugging (for 'lit' development)",
             action="store_true")
     debug_group.add_argument("--show-suites",
-            dest="showSuites",
-            help="Show discovered test suites",
+            help="Show discovered test suites and exit",
             action="store_true")
     debug_group.add_argument("--show-tests",
-            dest="showTests",
-            help="Show all discovered tests",
+            help="Show all discovered tests and exit",
+            action="store_true")
+    debug_group.add_argument("--show-used-features",
+            help="Show all features used in the test suite (in XFAIL, UNSUPPORTED and REQUIRES) and exit",
             action="store_true")
 
     # LIT is special: environment variables override command line arguments.
@@ -185,6 +186,14 @@ def parse_args():
         opts.shard = (opts.runShard, opts.numShards)
     else:
         opts.shard = None
+
+    opts.show_results = set()
+    if opts.show_unsupported:
+        opts.show_results.add(lit.Test.UNSUPPORTED)
+    if opts.show_xfail:
+        opts.show_results.add(lit.Test.XFAIL)
+
+    opts.reports = filter(None, [opts.output, opts.xunit_xml_output])
 
     return opts
 
