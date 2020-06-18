@@ -44,7 +44,7 @@ namespace cert {
 class CERTModule : public ClangTidyModule {
 public:
   void addCheckFactories(ClangTidyCheckFactories &CheckFactories) override {
-    // C++ checkers
+    // C++ checks
     // CON
     CheckFactories.registerCheck<bugprone::SpuriouslyWakeUpFunctionsCheck>(
         "cert-con54-cpp");
@@ -85,7 +85,7 @@ public:
     CheckFactories.registerCheck<MutatingCopyCheck>(
         "cert-oop58-cpp");
 
-    // C checkers
+    // C checks
     // CON
     CheckFactories.registerCheck<bugprone::SignalInMultithreadedProgramCheck>(
         "cert-con37-c");
