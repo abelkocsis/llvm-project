@@ -11,6 +11,7 @@
 #include "../utils/OptionsUtils.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
+#include "clang/Basic/TargetInfo.h"
 
 using namespace clang::ast_matchers;
 using namespace clang::ast_matchers::internal;
@@ -18,6 +19,8 @@ using namespace clang::ast_matchers::internal;
 namespace clang {
 namespace tidy {
 namespace bugprone {
+
+static Preprocessor *PP;
 
 Matcher<FunctionDecl> hasAnyListedName(const std::string &FunctionNames) {
   const std::vector<std::string> NameList =
@@ -31,6 +34,7 @@ void SignalInMultithreadedProgramCheck::storeOptions(
 }
 
 void SignalInMultithreadedProgramCheck::registerMatchers(MatchFinder *Finder) {
+
   auto threadCall =
       anyOf(hasDescendant(callExpr(ignoringImpCasts(hasDescendant(declRefExpr(
                 hasDeclaration(functionDecl(hasAnyListedName(ThreadList)))))))),
@@ -49,9 +53,19 @@ void SignalInMultithreadedProgramCheck::registerMatchers(MatchFinder *Finder) {
 
 void SignalInMultithreadedProgramCheck::check(
     const MatchFinder::MatchResult &Result) {
+  bool IsPosix = PP->isMacroDefined("__unix__") ||
+                 Result.Context->getTargetInfo().getTriple().getVendor() ==
+                     llvm::Triple::Apple;
+  if (IsPosix)
+    return;
   const auto *MatchedSignal = Result.Nodes.getNodeAs<CallExpr>("signal");
   diag(MatchedSignal->getExprLoc(),
        "signal function should not be called in a multithreaded program");
+}
+
+void SignalInMultithreadedProgramCheck::registerPPCallbacks(
+    const SourceManager &SM, Preprocessor *pp, Preprocessor *ModuleExpanderPP) {
+  PP = pp;
 }
 
 } // namespace bugprone

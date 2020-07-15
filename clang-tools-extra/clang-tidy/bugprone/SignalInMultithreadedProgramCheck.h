@@ -21,7 +21,7 @@ namespace bugprone {
 
 /// Finds ``signal`` function calls when the program is multithreaded. The
 /// check considers the analyzed program multithreaded if it finds at least
-/// one function call of the following: ``thrd_create``, ``std::thread``, 
+/// one function call of the following: ``thrd_create``, ``std::thread``,
 /// ``boost::thread``, ``pthread_t``.
 ///
 /// For the user-facing documentation see:
@@ -35,6 +35,8 @@ public:
   void storeOptions(ClangTidyOptions::OptionMap &Opts) override;
   void registerMatchers(ast_matchers::MatchFinder *Finder) override;
   void check(const ast_matchers::MatchFinder::MatchResult &Result) override;
+  void registerPPCallbacks(const SourceManager &SM, Preprocessor *PP,
+                           Preprocessor *ModuleExpanderPP) override;
 
 private:
   const std::string ThreadList;
