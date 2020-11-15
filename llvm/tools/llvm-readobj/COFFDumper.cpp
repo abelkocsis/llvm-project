@@ -12,7 +12,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "ARMWinEHPrinter.h"
-#include "Error.h"
 #include "ObjDumper.h"
 #include "StackMapPrinter.h"
 #include "Win64EHDumper.h"
@@ -60,10 +59,6 @@ using namespace llvm::codeview;
 using namespace llvm::support;
 using namespace llvm::Win64EH;
 
-static inline Error createError(const Twine &Err) {
-  return make_error<StringError>(Err, object_error::parse_failed);
-}
-
 namespace {
 
 struct LoadConfigTables {
@@ -94,6 +89,7 @@ public:
   void printCOFFDirectives() override;
   void printCOFFBaseReloc() override;
   void printCOFFDebugDirectory() override;
+  void printCOFFTLSDirectory() override;
   void printCOFFResources() override;
   void printCOFFLoadConfig() override;
   void printCodeViewDebugInfo() override;
@@ -104,8 +100,10 @@ public:
                           bool GHash) override;
   void printStackMap() const override;
   void printAddrsig() override;
+  void printCGProfile() override;
 
 private:
+  StringRef getSymbolName(uint32_t Index);
   void printSymbols() override;
   void printDynamicSymbols() override;
   void printSymbol(const SymbolRef &Sym);
@@ -119,6 +117,8 @@ private:
   void printBaseOfDataField(const pe32plus_header *Hdr);
   template <typename T>
   void printCOFFLoadConfig(const T *Conf, LoadConfigTables &Tables);
+  template <typename IntTy>
+  void printCOFFTLSDirectory(const coff_tls_directory<IntTy> *TlsTable);
   typedef void (*PrintExtraCB)(raw_ostream &, const uint8_t *);
   void printRVATable(uint64_t TableVA, uint64_t Count, uint64_t EntrySize,
                      PrintExtraCB PrintExtra = 0);
@@ -241,15 +241,9 @@ private:
 
 namespace llvm {
 
-std::error_code createCOFFDumper(const object::ObjectFile *Obj,
-                                 ScopedPrinter &Writer,
-                                 std::unique_ptr<ObjDumper> &Result) {
-  const COFFObjectFile *COFFObj = dyn_cast<COFFObjectFile>(Obj);
-  if (!COFFObj)
-    return readobj_error::unsupported_obj_file_format;
-
-  Result.reset(new COFFDumper(COFFObj, Writer));
-  return readobj_error::success;
+std::unique_ptr<ObjDumper> createCOFFDumper(const object::COFFObjectFile &Obj,
+                                            ScopedPrinter &Writer) {
+  return std::make_unique<COFFDumper>(&Obj, Writer);
 }
 
 } // namespace llvm
@@ -270,9 +264,9 @@ std::error_code COFFDumper::resolveSymbol(const coff_section *Section,
     }
   }
   if (SymI == Obj->symbol_end())
-    return readobj_error::unknown_symbol;
+    return inconvertibleErrorCode();
   Sym = *SymI;
-  return readobj_error::success;
+  return std::error_code();
 }
 
 // Given a section and an offset into this section the function returns the name
@@ -586,7 +580,7 @@ static std::error_code getSymbolAuxData(const COFFObjectFile *Obj,
   ArrayRef<uint8_t> AuxData = Obj->getSymbolAuxData(Symbol);
   AuxData = AuxData.slice(AuxSymbolIdx * Obj->getSymbolTableEntrySize());
   Aux = reinterpret_cast<const T*>(AuxData.data());
-  return readobj_error::success;
+  return std::error_code();
 }
 
 void COFFDumper::cacheRelocations() {
@@ -1516,16 +1510,8 @@ void COFFDumper::printSymbol(const SymbolRef &Sym) {
       if (std::error_code EC = getSymbolAuxData(Obj, Symbol, I, Aux))
         reportError(errorCodeToError(EC), Obj->getFileName());
 
-      Expected<COFFSymbolRef> Linked = Obj->getSymbol(Aux->TagIndex);
-      if (!Linked)
-        reportError(Linked.takeError(), Obj->getFileName());
-
-      Expected<StringRef> LinkedName = Obj->getSymbolName(*Linked);
-      if (!LinkedName)
-        reportError(LinkedName.takeError(), Obj->getFileName());
-
       DictScope AS(W, "AuxWeakExternal");
-      W.printNumber("Linked", *LinkedName, Aux->TagIndex);
+      W.printNumber("Linked", getSymbolName(Aux->TagIndex), Aux->TagIndex);
       W.printEnum  ("Search", Aux->Characteristics,
                     makeArrayRef(WeakExternalCharacteristics));
 
@@ -1570,19 +1556,11 @@ void COFFDumper::printSymbol(const SymbolRef &Sym) {
       if (std::error_code EC = getSymbolAuxData(Obj, Symbol, I, Aux))
         reportError(errorCodeToError(EC), Obj->getFileName());
 
-      Expected<COFFSymbolRef> ReferredSym =
-          Obj->getSymbol(Aux->SymbolTableIndex);
-      if (!ReferredSym)
-        reportError(ReferredSym.takeError(), Obj->getFileName());
-
-      Expected<StringRef> ReferredName = Obj->getSymbolName(*ReferredSym);
-      if (!ReferredName)
-        reportError(ReferredName.takeError(), Obj->getFileName());
-
       DictScope AS(W, "AuxCLRToken");
       W.printNumber("AuxType", Aux->AuxType);
       W.printNumber("Reserved", Aux->Reserved);
-      W.printNumber("SymbolTableIndex", *ReferredName, Aux->SymbolTableIndex);
+      W.printNumber("SymbolTableIndex", getSymbolName(Aux->SymbolTableIndex),
+                    Aux->SymbolTableIndex);
 
     } else {
       W.startLine() << "<unhandled auxiliary record>\n";
@@ -1904,7 +1882,7 @@ void COFFDumper::printResourceDirectoryTable(
 }
 
 void COFFDumper::printStackMap() const {
-  object::SectionRef StackMapSection;
+  SectionRef StackMapSection;
   for (auto Sec : Obj->sections()) {
     StringRef Name;
     if (Expected<StringRef> NameOrErr = Sec.getName())
@@ -1918,7 +1896,7 @@ void COFFDumper::printStackMap() const {
     }
   }
 
-  if (StackMapSection == object::SectionRef())
+  if (StackMapSection == SectionRef())
     return;
 
   StringRef StackMapContents =
@@ -1935,7 +1913,7 @@ void COFFDumper::printStackMap() const {
 }
 
 void COFFDumper::printAddrsig() {
-  object::SectionRef AddrsigSection;
+  SectionRef AddrsigSection;
   for (auto Sec : Obj->sections()) {
     StringRef Name;
     if (Expected<StringRef> NameOrErr = Sec.getName())
@@ -1949,7 +1927,7 @@ void COFFDumper::printAddrsig() {
     }
   }
 
-  if (AddrsigSection == object::SectionRef())
+  if (AddrsigSection == SectionRef())
     return;
 
   StringRef AddrsigContents =
@@ -1967,17 +1945,56 @@ void COFFDumper::printAddrsig() {
     if (Err)
       reportError(createError(Err), Obj->getFileName());
 
-    Expected<COFFSymbolRef> Sym = Obj->getSymbol(SymIndex);
-    if (!Sym)
-      reportError(Sym.takeError(), Obj->getFileName());
-
-    Expected<StringRef> SymName = Obj->getSymbolName(*Sym);
-    if (!SymName)
-      reportError(SymName.takeError(), Obj->getFileName());
-
-    W.printNumber("Sym", *SymName, SymIndex);
+    W.printNumber("Sym", getSymbolName(SymIndex), SymIndex);
     Cur += Size;
   }
+}
+
+void COFFDumper::printCGProfile() {
+  SectionRef CGProfileSection;
+  for (SectionRef Sec : Obj->sections()) {
+    StringRef Name = unwrapOrError(Obj->getFileName(), Sec.getName());
+    if (Name == ".llvm.call-graph-profile") {
+      CGProfileSection = Sec;
+      break;
+    }
+  }
+
+  if (CGProfileSection == SectionRef())
+    return;
+
+  StringRef CGProfileContents =
+      unwrapOrError(Obj->getFileName(), CGProfileSection.getContents());
+  BinaryStreamReader Reader(CGProfileContents, llvm::support::little);
+
+  ListScope L(W, "CGProfile");
+  while (!Reader.empty()) {
+    uint32_t FromIndex, ToIndex;
+    uint64_t Count;
+    if (Error Err = Reader.readInteger(FromIndex))
+      reportError(std::move(Err), Obj->getFileName());
+    if (Error Err = Reader.readInteger(ToIndex))
+      reportError(std::move(Err), Obj->getFileName());
+    if (Error Err = Reader.readInteger(Count))
+      reportError(std::move(Err), Obj->getFileName());
+
+    DictScope D(W, "CGProfileEntry");
+    W.printNumber("From", getSymbolName(FromIndex), FromIndex);
+    W.printNumber("To", getSymbolName(ToIndex), ToIndex);
+    W.printNumber("Weight", Count);
+  }
+}
+
+StringRef COFFDumper::getSymbolName(uint32_t Index) {
+  Expected<COFFSymbolRef> Sym = Obj->getSymbol(Index);
+  if (!Sym)
+    reportError(Sym.takeError(), Obj->getFileName());
+
+  Expected<StringRef> SymName = Obj->getSymbolName(*Sym);
+  if (!SymName)
+    reportError(SymName.takeError(), Obj->getFileName());
+
+  return *SymName;
 }
 
 void llvm::dumpCodeViewMergedTypes(ScopedPrinter &Writer,
@@ -2003,4 +2020,28 @@ void llvm::dumpCodeViewMergedTypes(ScopedPrinter &Writer,
       reportError(std::move(Err), "<?>");
     Writer.flush();
   }
+}
+
+void COFFDumper::printCOFFTLSDirectory() {
+  if (Obj->is64())
+    printCOFFTLSDirectory(Obj->getTLSDirectory64());
+  else
+    printCOFFTLSDirectory(Obj->getTLSDirectory32());
+}
+
+template <typename IntTy>
+void COFFDumper::printCOFFTLSDirectory(
+    const coff_tls_directory<IntTy> *TlsTable) {
+  DictScope D(W, "TLSDirectory");
+  if (!TlsTable)
+    return;
+
+  W.printHex("StartAddressOfRawData", TlsTable->StartAddressOfRawData);
+  W.printHex("EndAddressOfRawData", TlsTable->EndAddressOfRawData);
+  W.printHex("AddressOfIndex", TlsTable->AddressOfIndex);
+  W.printHex("AddressOfCallBacks", TlsTable->AddressOfCallBacks);
+  W.printHex("SizeOfZeroFill", TlsTable->SizeOfZeroFill);
+  W.printFlags("Characteristics", TlsTable->Characteristics,
+               makeArrayRef(ImageSectionCharacteristics),
+               COFF::SectionCharacteristics(COFF::IMAGE_SCN_ALIGN_MASK));
 }

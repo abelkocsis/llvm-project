@@ -311,9 +311,36 @@ bool VEInstrInfo::reverseBranchCondition(
 }
 
 static bool IsAliasOfSX(Register Reg) {
-  return VE::I8RegClass.contains(Reg) || VE::I16RegClass.contains(Reg) ||
-         VE::I32RegClass.contains(Reg) || VE::I64RegClass.contains(Reg) ||
+  return VE::I32RegClass.contains(Reg) || VE::I64RegClass.contains(Reg) ||
          VE::F32RegClass.contains(Reg);
+}
+
+static void copyPhysSubRegs(MachineBasicBlock &MBB,
+                            MachineBasicBlock::iterator I, const DebugLoc &DL,
+                            MCRegister DestReg, MCRegister SrcReg, bool KillSrc,
+                            const MCInstrDesc &MCID, unsigned int NumSubRegs,
+                            const unsigned *SubRegIdx,
+                            const TargetRegisterInfo *TRI) {
+  MachineInstr *MovMI = nullptr;
+
+  for (unsigned Idx = 0; Idx != NumSubRegs; ++Idx) {
+    Register SubDest = TRI->getSubReg(DestReg, SubRegIdx[Idx]);
+    Register SubSrc = TRI->getSubReg(SrcReg, SubRegIdx[Idx]);
+    assert(SubDest && SubSrc && "Bad sub-register");
+
+    if (MCID.getOpcode() == VE::ORri) {
+      // generate "ORri, dest, src, 0" instruction.
+      MachineInstrBuilder MIB =
+          BuildMI(MBB, I, DL, MCID, SubDest).addReg(SubSrc).addImm(0);
+      MovMI = MIB.getInstr();
+    } else {
+      llvm_unreachable("Unexpected reg-to-reg copy instruction");
+    }
+  }
+  // Add implicit super-register defs and kills to the last MovMI.
+  MovMI->addRegisterDefined(DestReg, TRI);
+  if (KillSrc)
+    MovMI->addRegisterKilled(SrcReg, TRI, true);
 }
 
 void VEInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
@@ -325,6 +352,12 @@ void VEInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     BuildMI(MBB, I, DL, get(VE::ORri), DestReg)
         .addReg(SrcReg, getKillRegState(KillSrc))
         .addImm(0);
+  } else if (VE::F128RegClass.contains(DestReg, SrcReg)) {
+    // Use two instructions.
+    const unsigned SubRegIdx[] = {VE::sub_even, VE::sub_odd};
+    unsigned int NumSubRegs = 2;
+    copyPhysSubRegs(MBB, I, DL, DestReg, SrcReg, KillSrc, get(VE::ORri),
+                    NumSubRegs, SubRegIdx, &getRegisterInfo());
   } else {
     const TargetRegisterInfo *TRI = &getRegisterInfo();
     dbgs() << "Impossible reg-to-reg copy from " << printReg(SrcReg, TRI)
@@ -342,7 +375,8 @@ unsigned VEInstrInfo::isLoadFromStackSlot(const MachineInstr &MI,
                                           int &FrameIndex) const {
   if (MI.getOpcode() == VE::LDrii ||    // I64
       MI.getOpcode() == VE::LDLSXrii || // I32
-      MI.getOpcode() == VE::LDUrii      // F32
+      MI.getOpcode() == VE::LDUrii ||   // F32
+      MI.getOpcode() == VE::LDQrii      // F128 (pseudo)
   ) {
     if (MI.getOperand(1).isFI() && MI.getOperand(2).isImm() &&
         MI.getOperand(2).getImm() == 0 && MI.getOperand(3).isImm() &&
@@ -363,7 +397,8 @@ unsigned VEInstrInfo::isStoreToStackSlot(const MachineInstr &MI,
                                          int &FrameIndex) const {
   if (MI.getOpcode() == VE::STrii ||  // I64
       MI.getOpcode() == VE::STLrii || // I32
-      MI.getOpcode() == VE::STUrii    // F32
+      MI.getOpcode() == VE::STUrii || // F32
+      MI.getOpcode() == VE::STQrii    // F128 (pseudo)
   ) {
     if (MI.getOperand(0).isFI() && MI.getOperand(1).isImm() &&
         MI.getOperand(1).getImm() == 0 && MI.getOperand(2).isImm() &&
@@ -412,6 +447,13 @@ void VEInstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
         .addImm(0)
         .addReg(SrcReg, getKillRegState(isKill))
         .addMemOperand(MMO);
+  } else if (VE::F128RegClass.hasSubClassEq(RC)) {
+    BuildMI(MBB, I, DL, get(VE::STQrii))
+        .addFrameIndex(FI)
+        .addImm(0)
+        .addImm(0)
+        .addReg(SrcReg, getKillRegState(isKill))
+        .addMemOperand(MMO);
   } else
     report_fatal_error("Can't store this register to stack slot");
 }
@@ -449,8 +491,192 @@ void VEInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
         .addImm(0)
         .addImm(0)
         .addMemOperand(MMO);
+  } else if (VE::F128RegClass.hasSubClassEq(RC)) {
+    BuildMI(MBB, I, DL, get(VE::LDQrii), DestReg)
+        .addFrameIndex(FI)
+        .addImm(0)
+        .addImm(0)
+        .addMemOperand(MMO);
   } else
     report_fatal_error("Can't load this register from stack slot");
+}
+
+bool VEInstrInfo::FoldImmediate(MachineInstr &UseMI, MachineInstr &DefMI,
+                                Register Reg, MachineRegisterInfo *MRI) const {
+  LLVM_DEBUG(dbgs() << "FoldImmediate\n");
+
+  LLVM_DEBUG(dbgs() << "checking DefMI\n");
+  int64_t ImmVal;
+  switch (DefMI.getOpcode()) {
+  default:
+    return false;
+  case VE::ORim:
+    // General move small immediate instruction on VE.
+    LLVM_DEBUG(dbgs() << "checking ORim\n");
+    LLVM_DEBUG(DefMI.dump());
+    // FIXME: We may need to support FPImm too.
+    assert(DefMI.getOperand(1).isImm());
+    assert(DefMI.getOperand(2).isImm());
+    ImmVal =
+        DefMI.getOperand(1).getImm() + mimm2Val(DefMI.getOperand(2).getImm());
+    LLVM_DEBUG(dbgs() << "ImmVal is " << ImmVal << "\n");
+    break;
+  case VE::LEAzii:
+    // General move immediate instruction on VE.
+    LLVM_DEBUG(dbgs() << "checking LEAzii\n");
+    LLVM_DEBUG(DefMI.dump());
+    // FIXME: We may need to support FPImm too.
+    assert(DefMI.getOperand(2).isImm());
+    if (!DefMI.getOperand(3).isImm())
+      // LEAzii may refer label
+      return false;
+    ImmVal = DefMI.getOperand(2).getImm() + DefMI.getOperand(3).getImm();
+    LLVM_DEBUG(dbgs() << "ImmVal is " << ImmVal << "\n");
+    break;
+  }
+
+  // Try to fold like below:
+  //   %1:i64 = ORim 0, 0(1)
+  //   %2:i64 = CMPSLrr %0, %1
+  // To
+  //   %2:i64 = CMPSLrm %0, 0(1)
+  //
+  // Another example:
+  //   %1:i64 = ORim 6, 0(1)
+  //   %2:i64 = CMPSLrr %1, %0
+  // To
+  //   %2:i64 = CMPSLir 6, %0
+  //
+  // Support commutable instructions like below:
+  //   %1:i64 = ORim 6, 0(1)
+  //   %2:i64 = ADDSLrr %1, %0
+  // To
+  //   %2:i64 = ADDSLri %0, 6
+  //
+  // FIXME: Need to support i32.  Current implementtation requires
+  //        EXTRACT_SUBREG, so input has following COPY and it avoids folding:
+  //   %1:i64 = ORim 6, 0(1)
+  //   %2:i32 = COPY %1.sub_i32
+  //   %3:i32 = ADDSWSXrr %0, %2
+  // FIXME: Need to support shift, cmov, and more instructions.
+  // FIXME: Need to support lvl too, but LVLGen runs after peephole-opt.
+
+  LLVM_DEBUG(dbgs() << "checking UseMI\n");
+  LLVM_DEBUG(UseMI.dump());
+  unsigned NewUseOpcSImm7;
+  unsigned NewUseOpcMImm;
+  enum InstType {
+    rr2ri_rm, // rr -> ri or rm, commutable
+    rr2ir_rm, // rr -> ir or rm
+  } InstType;
+
+  using namespace llvm::VE;
+#define INSTRKIND(NAME)                                                        \
+  case NAME##rr:                                                               \
+    NewUseOpcSImm7 = NAME##ri;                                                 \
+    NewUseOpcMImm = NAME##rm;                                                  \
+    InstType = rr2ri_rm;                                                       \
+    break
+#define NCINSTRKIND(NAME)                                                      \
+  case NAME##rr:                                                               \
+    NewUseOpcSImm7 = NAME##ir;                                                 \
+    NewUseOpcMImm = NAME##rm;                                                  \
+    InstType = rr2ir_rm;                                                       \
+    break
+
+  switch (UseMI.getOpcode()) {
+  default:
+    return false;
+
+    INSTRKIND(ADDUL);
+    INSTRKIND(ADDSWSX);
+    INSTRKIND(ADDSWZX);
+    INSTRKIND(ADDSL);
+    NCINSTRKIND(SUBUL);
+    NCINSTRKIND(SUBSWSX);
+    NCINSTRKIND(SUBSWZX);
+    NCINSTRKIND(SUBSL);
+    INSTRKIND(MULUL);
+    INSTRKIND(MULSWSX);
+    INSTRKIND(MULSWZX);
+    INSTRKIND(MULSL);
+    NCINSTRKIND(DIVUL);
+    NCINSTRKIND(DIVSWSX);
+    NCINSTRKIND(DIVSWZX);
+    NCINSTRKIND(DIVSL);
+    NCINSTRKIND(CMPUL);
+    NCINSTRKIND(CMPSWSX);
+    NCINSTRKIND(CMPSWZX);
+    NCINSTRKIND(CMPSL);
+    INSTRKIND(MAXSWSX);
+    INSTRKIND(MAXSWZX);
+    INSTRKIND(MAXSL);
+    INSTRKIND(MINSWSX);
+    INSTRKIND(MINSWZX);
+    INSTRKIND(MINSL);
+    INSTRKIND(AND);
+    INSTRKIND(OR);
+    INSTRKIND(XOR);
+    INSTRKIND(EQV);
+    NCINSTRKIND(NND);
+    NCINSTRKIND(MRG);
+  }
+
+#undef INSTRKIND
+
+  unsigned NewUseOpc;
+  unsigned UseIdx;
+  bool Commute = false;
+  LLVM_DEBUG(dbgs() << "checking UseMI operands\n");
+  switch (InstType) {
+  case rr2ri_rm:
+    UseIdx = 2;
+    if (UseMI.getOperand(1).getReg() == Reg) {
+      Commute = true;
+    } else {
+      assert(UseMI.getOperand(2).getReg() == Reg);
+    }
+    if (isInt<7>(ImmVal)) {
+      // This ImmVal matches to SImm7 slot, so change UseOpc to an instruction
+      // holds a simm7 slot.
+      NewUseOpc = NewUseOpcSImm7;
+    } else if (isMImmVal(ImmVal)) {
+      // Similarly, change UseOpc to an instruction holds a mimm slot.
+      NewUseOpc = NewUseOpcMImm;
+      ImmVal = val2MImm(ImmVal);
+    } else
+      return false;
+    break;
+  case rr2ir_rm:
+    if (UseMI.getOperand(1).getReg() == Reg) {
+      // Check immediate value whether it matchs to the UseMI instruction.
+      if (!isInt<7>(ImmVal))
+        return false;
+      NewUseOpc = NewUseOpcSImm7;
+      UseIdx = 1;
+    } else {
+      assert(UseMI.getOperand(2).getReg() == Reg);
+      // Check immediate value whether it matchs to the UseMI instruction.
+      if (!isMImmVal(ImmVal))
+        return false;
+      NewUseOpc = NewUseOpcMImm;
+      ImmVal = val2MImm(ImmVal);
+      UseIdx = 2;
+    }
+    break;
+  }
+
+  LLVM_DEBUG(dbgs() << "modifying UseMI\n");
+  bool DeleteDef = MRI->hasOneNonDBGUse(Reg);
+  UseMI.setDesc(get(NewUseOpc));
+  if (Commute) {
+    UseMI.getOperand(1).setReg(UseMI.getOperand(UseIdx).getReg());
+  }
+  UseMI.getOperand(UseIdx).ChangeToImmediate(ImmVal);
+  if (DeleteDef)
+    DefMI.eraseFromParent();
+
+  return true;
 }
 
 Register VEInstrInfo::getGlobalBaseReg(MachineFunction *MF) const {

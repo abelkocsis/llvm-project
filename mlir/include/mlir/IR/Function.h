@@ -51,21 +51,13 @@ public:
                        ArrayRef<MutableDictionaryAttr> argAttrs);
 
   static void build(OpBuilder &builder, OperationState &result, StringRef name,
-                    FunctionType type, ArrayRef<NamedAttribute> attrs);
-  static void build(OpBuilder &builder, OperationState &result, StringRef name,
-                    FunctionType type, ArrayRef<NamedAttribute> attrs,
-                    ArrayRef<MutableDictionaryAttr> argAttrs);
+                    FunctionType type, ArrayRef<NamedAttribute> attrs = {},
+                    ArrayRef<MutableDictionaryAttr> argAttrs = {});
 
   /// Operation hooks.
   static ParseResult parse(OpAsmParser &parser, OperationState &result);
   void print(OpAsmPrinter &p);
   LogicalResult verify();
-
-  /// Erase a single argument at `argIndex`.
-  void eraseArgument(unsigned argIndex) { eraseArguments({argIndex}); }
-  /// Erases the arguments listed in `argIndices`.
-  /// `argIndices` is allowed to have duplicates and can be in any order.
-  void eraseArguments(ArrayRef<unsigned> argIndices);
 
   /// Create a deep copy of this function and all of its blocks, remapping
   /// any operands that use values outside of the function using the map that is

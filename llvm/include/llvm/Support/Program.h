@@ -36,7 +36,7 @@ namespace sys {
   typedef unsigned long procid_t; // Must match the type of DWORD on Windows.
   typedef void *process_t;        // Must match the type of HANDLE on Windows.
 #else
-  typedef pid_t procid_t;
+  typedef ::pid_t procid_t;
   typedef procid_t process_t;
 #endif
 
@@ -57,7 +57,7 @@ namespace sys {
   struct ProcessStatistics {
     std::chrono::microseconds TotalTime;
     std::chrono::microseconds UserTime;
-    uint64_t PeakMemory = 0;
+    uint64_t PeakMemory = 0; ///< Maximum resident set size in KiB.
   };
 
   /// Find the first executable file \p Name in \p Paths.
@@ -210,12 +210,15 @@ namespace sys {
       /// stored.
   );
 
+  /// Print a command argument, and optionally quote it.
+  void printArg(llvm::raw_ostream &OS, StringRef Arg, bool Quote);
+
 #if defined(_WIN32)
   /// Given a list of command line arguments, quote and escape them as necessary
   /// to build a single flat command line appropriate for calling CreateProcess
   /// on
   /// Windows.
-  std::string flattenWindowsCommandLine(ArrayRef<StringRef> Args);
+  ErrorOr<std::wstring> flattenWindowsCommandLine(ArrayRef<StringRef> Args);
 #endif
   }
 }

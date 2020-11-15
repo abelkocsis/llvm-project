@@ -184,6 +184,10 @@ let TargetPrefix = "aarch64" in {  // All intrinsics start with "llvm.aarch64.".
                 [LLVMMatchType<0>, llvm_anyvector_ty, LLVMMatchType<1>],
                 [IntrNoMem]>;
 
+  class AdvSIMD_BF16FML_Intrinsic
+    : Intrinsic<[llvm_v4f32_ty],
+                [llvm_v4f32_ty, llvm_v8bf16_ty, llvm_v8bf16_ty],
+                [IntrNoMem]>;
 }
 
 // Arithmetic ops
@@ -466,10 +470,23 @@ let TargetPrefix = "aarch64", IntrProperties = [IntrNoMem] in {
   def int_aarch64_neon_usmmla : AdvSIMD_MatMul_Intrinsic;
   def int_aarch64_neon_usdot : AdvSIMD_Dot_Intrinsic;
   def int_aarch64_neon_bfdot : AdvSIMD_Dot_Intrinsic;
-  def int_aarch64_neon_bfmmla : AdvSIMD_MatMul_Intrinsic;
-  def int_aarch64_neon_bfmlalb : AdvSIMD_FML_Intrinsic;
-  def int_aarch64_neon_bfmlalt : AdvSIMD_FML_Intrinsic;
+  def int_aarch64_neon_bfmmla
+    : Intrinsic<[llvm_v4f32_ty],
+                [llvm_v4f32_ty, llvm_v8bf16_ty, llvm_v8bf16_ty],
+                [IntrNoMem]>;
+  def int_aarch64_neon_bfmlalb : AdvSIMD_BF16FML_Intrinsic;
+  def int_aarch64_neon_bfmlalt : AdvSIMD_BF16FML_Intrinsic;
 
+
+  // v8.6-A Bfloat Intrinsics
+  def int_aarch64_neon_bfcvt
+    : Intrinsic<[llvm_bfloat_ty], [llvm_float_ty], [IntrNoMem]>;
+  def int_aarch64_neon_bfcvtn
+    : Intrinsic<[llvm_v8bf16_ty], [llvm_v4f32_ty], [IntrNoMem]>;
+  def int_aarch64_neon_bfcvtn2
+    : Intrinsic<[llvm_v8bf16_ty],
+                [llvm_v8bf16_ty, llvm_v4f32_ty],
+                [IntrNoMem]>;
 
   // v8.2-A FP16 Fused Multiply-Add Long
   def int_aarch64_neon_fmlal : AdvSIMD_FP16FML_Intrinsic;
@@ -750,6 +767,10 @@ def int_aarch64_irg_sp   : Intrinsic<[llvm_ptr_ty], [llvm_i64_ty],
 // ptr1 = tagp(ptr0, baseptr, tag_offset) returns a pointer where
 // * address is the address in ptr0
 // * tag is a function of (tag in baseptr, tag_offset).
+// ** Beware, this is not the same function as implemented by the ADDG instruction!
+//    Backend optimizations may change tag_offset; the only guarantee is that calls
+//    to tagp with the same pair of (baseptr, tag_offset) will produce pointers
+//    with the same tag value, assuming the set of excluded tags has not changed.
 // Address bits in baseptr and tag bits in ptr0 are ignored.
 // When offset between ptr0 and baseptr is a compile time constant, this can be emitted as
 //   ADDG ptr1, baseptr, (ptr0 - baseptr), tag_offset
@@ -1283,7 +1304,7 @@ class AdvSIMD_GatherLoad_VS_Intrinsic
                   llvm_anyvector_ty,
                   llvm_i64_ty
                 ],
-                [IntrReadMem, IntrArgMemOnly]>;
+                [IntrReadMem]>;
 
 class AdvSIMD_ScatterStore_SV_64b_Offsets_Intrinsic
     : Intrinsic<[],
@@ -1312,7 +1333,7 @@ class AdvSIMD_ScatterStore_VS_Intrinsic
                  LLVMScalarOrSameVectorWidth<0, llvm_i1_ty>,
                  llvm_anyvector_ty, llvm_i64_ty
                ],
-               [IntrWriteMem, IntrArgMemOnly]>;
+               [IntrWriteMem]>;
 
 
 class SVE_gather_prf_SV
@@ -1339,6 +1360,16 @@ class SVE_MatMul_Intrinsic
     : Intrinsic<[llvm_anyvector_ty],
                 [LLVMMatchType<0>, LLVMSubdivide4VectorType<0>, LLVMSubdivide4VectorType<0>],
                 [IntrNoMem]>;
+
+class SVE_4Vec_BF16
+    : Intrinsic<[llvm_nxv4f32_ty],
+                [llvm_nxv4f32_ty, llvm_nxv8bf16_ty, llvm_nxv8bf16_ty],
+                [IntrNoMem]>;
+
+class SVE_4Vec_BF16_Indexed
+    : Intrinsic<[llvm_nxv4f32_ty],
+                [llvm_nxv4f32_ty, llvm_nxv8bf16_ty, llvm_nxv8bf16_ty, llvm_i64_ty],
+                [IntrNoMem, ImmArg<ArgIndex<3>>]>;
 
 //
 // Vector tuple creation intrinsics (ACLE)
@@ -1792,6 +1823,9 @@ def int_aarch64_sve_fcvtzs_i32f16   : Builtin_SVCVT<"svcvt_s32_f16_m", llvm_nxv4
 def int_aarch64_sve_fcvtzs_i32f64   : Builtin_SVCVT<"svcvt_s32_f64_m", llvm_nxv4i32_ty, llvm_nxv2i1_ty, llvm_nxv2f64_ty>;
 def int_aarch64_sve_fcvtzs_i64f16   : Builtin_SVCVT<"svcvt_s64_f16_m", llvm_nxv2i64_ty, llvm_nxv2i1_ty, llvm_nxv8f16_ty>;
 def int_aarch64_sve_fcvtzs_i64f32   : Builtin_SVCVT<"svcvt_s64_f32_m", llvm_nxv2i64_ty, llvm_nxv2i1_ty, llvm_nxv4f32_ty>;
+
+def int_aarch64_sve_fcvt_bf16f32    : Builtin_SVCVT<"svcvt_bf16_f32_m",   llvm_nxv8bf16_ty, llvm_nxv8i1_ty, llvm_nxv4f32_ty>;
+def int_aarch64_sve_fcvtnt_bf16f32  : Builtin_SVCVT<"svcvtnt_bf16_f32_m", llvm_nxv8bf16_ty, llvm_nxv8i1_ty, llvm_nxv4f32_ty>;
 
 def int_aarch64_sve_fcvtzu_i32f16   : Builtin_SVCVT<"svcvt_u32_f16_m", llvm_nxv4i32_ty, llvm_nxv4i1_ty, llvm_nxv8f16_ty>;
 def int_aarch64_sve_fcvtzu_i32f64   : Builtin_SVCVT<"svcvt_u32_f64_m", llvm_nxv4i32_ty, llvm_nxv2i1_ty, llvm_nxv2f64_ty>;
@@ -2343,6 +2377,19 @@ def int_aarch64_sve_sudot_lane : AdvSIMD_SVE_DOT_Indexed_Intrinsic;
 //
 def int_aarch64_sve_fmmla : AdvSIMD_3VectorArg_Intrinsic;
 
+//
+// SVE ACLE: 7.2. BFloat16 extensions
+//
+
+def int_aarch64_sve_bfdot   : SVE_4Vec_BF16;
+def int_aarch64_sve_bfmlalb : SVE_4Vec_BF16;
+def int_aarch64_sve_bfmlalt : SVE_4Vec_BF16;
+
+def int_aarch64_sve_bfmmla  : SVE_4Vec_BF16;
+
+def int_aarch64_sve_bfdot_lane   : SVE_4Vec_BF16_Indexed;
+def int_aarch64_sve_bfmlalb_lane : SVE_4Vec_BF16_Indexed;
+def int_aarch64_sve_bfmlalt_lane : SVE_4Vec_BF16_Indexed;
 }
 
 //

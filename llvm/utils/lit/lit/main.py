@@ -39,7 +39,8 @@ def main(builtin_params={}):
         config_prefix=opts.configPrefix,
         echo_all_commands=opts.echoAllCommands)
 
-    discovered_tests = lit.discovery.find_tests_for_inputs(lit_config, opts.test_paths)
+    discovered_tests = lit.discovery.find_tests_for_inputs(lit_config, opts.test_paths,
+                                                           opts.indirectlyRunCheck)
     if not discovered_tests:
         sys.stderr.write('error: did not discover any tests for provided path(s)\n')
         sys.exit(2)
@@ -80,9 +81,13 @@ def main(builtin_params={}):
                              'error.\n')
             sys.exit(2)
 
+    # When running multiple shards, don't include skipped tests in the xunit
+    # output since merging the files will result in duplicates.
+    tests_for_report = discovered_tests
     if opts.shard:
         (run, shards) = opts.shard
         selected_tests = filter_by_shard(selected_tests, run, shards, lit_config)
+        tests_for_report = selected_tests
         if not selected_tests:
             sys.stderr.write('warning: shard does not contain any tests.  '
                              'Consider decreasing the number of shards.\n')
@@ -102,7 +107,7 @@ def main(builtin_params={}):
     print_results(discovered_tests, elapsed, opts)
 
     for report in opts.reports:
-        report.write_results(discovered_tests, elapsed)
+        report.write_results(tests_for_report, elapsed)
 
     if lit_config.numErrors:
         sys.stderr.write('\n%d error(s) in tests\n' % lit_config.numErrors)
@@ -259,46 +264,24 @@ def print_histogram(tests):
         lit.util.printHistogram(test_times, title='Tests')
 
 
-def add_result_category(result_code, label):
-    assert isinstance(result_code, lit.Test.ResultCode)
-    category = (result_code, label)
-    result_codes.append(category)
-
-
-result_codes = [
-    # Passes
-    (lit.Test.EXCLUDED,    'Excluded'),
-    (lit.Test.SKIPPED,     'Skipped'),
-    (lit.Test.UNSUPPORTED, 'Unsupported'),
-    (lit.Test.PASS,        'Passed'),
-    (lit.Test.FLAKYPASS,   'Passed With Retry'),
-    (lit.Test.XFAIL,       'Expectedly Failed'),
-    # Failures
-    (lit.Test.UNRESOLVED,  'Unresolved'),
-    (lit.Test.TIMEOUT,     'Timed Out'),
-    (lit.Test.FAIL,        'Failed'),
-    (lit.Test.XPASS,       'Unexpectedly Passed')
-]
-
-
 def print_results(tests, elapsed, opts):
-    tests_by_code = {code: [] for code, _ in result_codes}
+    tests_by_code = {code: [] for code in lit.Test.ResultCode.all_codes()}
     for test in tests:
         tests_by_code[test.result.code].append(test)
 
-    for (code, label) in result_codes:
-        print_group(code, label, tests_by_code[code], opts.show_results)
+    for code in lit.Test.ResultCode.all_codes():
+        print_group(tests_by_code[code], code, opts.shown_codes)
 
     print_summary(tests_by_code, opts.quiet, elapsed)
 
 
-def print_group(code, label, tests, show_results):
+def print_group(tests, code, shown_codes):
     if not tests:
         return
-    if not code.isFailure and code not in show_results:
+    if not code.isFailure and code not in shown_codes:
         return
     print('*' * 20)
-    print('%s Tests (%d):' % (label, len(tests)))
+    print('{} Tests ({}):'.format(code.label, len(tests)))
     for test in tests:
         print('  %s' % test.getFullName())
     sys.stdout.write('\n')
@@ -308,8 +291,9 @@ def print_summary(tests_by_code, quiet, elapsed):
     if not quiet:
         print('\nTesting Time: %.2fs' % elapsed)
 
-    codes = [c for c in result_codes if not quiet or c.isFailure]
-    groups = [(label, len(tests_by_code[code])) for code, label in codes]
+    codes = [c for c in lit.Test.ResultCode.all_codes()
+             if not quiet or c.isFailure]
+    groups = [(c.label, len(tests_by_code[c])) for c in codes]
     groups = [(label, count) for label, count in groups if count]
     if not groups:
         return

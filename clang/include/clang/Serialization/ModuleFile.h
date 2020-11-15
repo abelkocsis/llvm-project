@@ -155,14 +155,11 @@ public:
   /// Whether timestamps are included in this module file.
   bool HasTimestamps = false;
 
-  /// Whether the PCH has a corresponding object file.
-  bool PCHHasObjectFile = false;
-
   /// Whether the top-level module has been read from the AST file.
   bool DidReadTopLevelSubmodule = false;
 
   /// The file entry for the module file.
-  const FileEntry *File = nullptr;
+  OptionalFileEntryRefDegradesToFileEntryPtr File;
 
   /// The signature of the module file, which may be used instead of the size
   /// and modification time to identify this particular file.

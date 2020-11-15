@@ -26,6 +26,7 @@
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/ExprObjC.h"
 #include "clang/AST/ExprOpenMP.h"
+#include "clang/AST/StmtOpenMP.h"
 #include "clang/AST/Type.h"
 #include "clang/Basic/ABI.h"
 #include "clang/Basic/CapturedStmt.h"
@@ -80,6 +81,7 @@ class OMPUseDevicePtrClause;
 class OMPUseDeviceAddrClause;
 class ReturnsNonNullAttr;
 class SVETypeFlags;
+class OMPExecutableDirective;
 
 namespace analyze_os_log {
 class OSLogBufferLayout;
@@ -122,6 +124,7 @@ enum TypeEvaluationKind {
   SANITIZER_CHECK(FunctionTypeMismatch, function_type_mismatch, 1)             \
   SANITIZER_CHECK(ImplicitConversion, implicit_conversion, 0)                  \
   SANITIZER_CHECK(InvalidBuiltin, invalid_builtin, 0)                          \
+  SANITIZER_CHECK(InvalidObjCCast, invalid_objc_cast, 0)                       \
   SANITIZER_CHECK(LoadInvalidValue, load_invalid_value, 0)                     \
   SANITIZER_CHECK(MissingReturn, missing_return, 0)                            \
   SANITIZER_CHECK(MulOverflow, mul_overflow, 0)                                \
@@ -259,116 +262,11 @@ public:
     unsigned Index;
   };
 
-  // Helper class for the OpenMP IR Builder. Allows reusability of code used for
-  // region body, and finalization codegen callbacks. This will class will also
-  // contain privatization functions used by the privatization call backs
-  struct OMPBuilderCBHelpers {
-
-    using InsertPointTy = llvm::OpenMPIRBuilder::InsertPointTy;
-
-    /// Emit the Finalization for an OMP region
-    /// \param CGF	The Codegen function this belongs to
-    /// \param IP	Insertion point for generating the finalization code.
-    static void FinalizeOMPRegion(CodeGenFunction &CGF, InsertPointTy IP) {
-      CGBuilderTy::InsertPointGuard IPG(CGF.Builder);
-      assert(IP.getBlock()->end() != IP.getPoint() &&
-             "OpenMP IR Builder should cause terminated block!");
-
-      llvm::BasicBlock *IPBB = IP.getBlock();
-      llvm::BasicBlock *DestBB = IPBB->getUniqueSuccessor();
-      assert(DestBB && "Finalization block should have one successor!");
-
-      // erase and replace with cleanup branch.
-      IPBB->getTerminator()->eraseFromParent();
-      CGF.Builder.SetInsertPoint(IPBB);
-      CodeGenFunction::JumpDest Dest = CGF.getJumpDestInCurrentScope(DestBB);
-      CGF.EmitBranchThroughCleanup(Dest);
-    }
-
-    /// Emit the body of an OMP region
-    /// \param CGF	The Codegen function this belongs to
-    /// \param RegionBodyStmt	The body statement for the OpenMP region being
-    /// 			 generated
-    /// \param CodeGenIP	Insertion point for generating the body code.
-    /// \param FiniBB	The finalization basic block
-    static void EmitOMPRegionBody(CodeGenFunction &CGF,
-                                  const Stmt *RegionBodyStmt,
-                                  InsertPointTy CodeGenIP,
-                                  llvm::BasicBlock &FiniBB) {
-      llvm::BasicBlock *CodeGenIPBB = CodeGenIP.getBlock();
-      if (llvm::Instruction *CodeGenIPBBTI = CodeGenIPBB->getTerminator())
-        CodeGenIPBBTI->eraseFromParent();
-
-      CGF.Builder.SetInsertPoint(CodeGenIPBB);
-
-      CGF.EmitStmt(RegionBodyStmt);
-
-      if (CGF.Builder.saveIP().isSet())
-        CGF.Builder.CreateBr(&FiniBB);
-    }
-
-    /// RAII for preserving necessary info during Outlined region body codegen.
-    class OutlinedRegionBodyRAII {
-
-      llvm::AssertingVH<llvm::Instruction> OldAllocaIP;
-      CodeGenFunction::JumpDest OldReturnBlock;
-      CodeGenFunction &CGF;
-
-    public:
-      OutlinedRegionBodyRAII(CodeGenFunction &cgf, InsertPointTy &AllocaIP,
-                             llvm::BasicBlock &RetBB)
-          : CGF(cgf) {
-        assert(AllocaIP.isSet() &&
-               "Must specify Insertion point for allocas of outlined function");
-        OldAllocaIP = CGF.AllocaInsertPt;
-        CGF.AllocaInsertPt = &*AllocaIP.getPoint();
-
-        OldReturnBlock = CGF.ReturnBlock;
-        CGF.ReturnBlock = CGF.getJumpDestInCurrentScope(&RetBB);
-      }
-
-      ~OutlinedRegionBodyRAII() {
-        CGF.AllocaInsertPt = OldAllocaIP;
-        CGF.ReturnBlock = OldReturnBlock;
-      }
-    };
-
-    /// RAII for preserving necessary info during inlined region body codegen.
-    class InlinedRegionBodyRAII {
-
-      llvm::AssertingVH<llvm::Instruction> OldAllocaIP;
-      CodeGenFunction &CGF;
-
-    public:
-      InlinedRegionBodyRAII(CodeGenFunction &cgf, InsertPointTy &AllocaIP,
-                            llvm::BasicBlock &FiniBB)
-          : CGF(cgf) {
-        // Alloca insertion block should be in the entry block of the containing
-        // function so it expects an empty AllocaIP in which case will reuse the
-        // old alloca insertion point, or a new AllocaIP in the same block as
-        // the old one
-        assert((!AllocaIP.isSet() ||
-                CGF.AllocaInsertPt->getParent() == AllocaIP.getBlock()) &&
-               "Insertion point should be in the entry block of containing "
-               "function!");
-        OldAllocaIP = CGF.AllocaInsertPt;
-        if (AllocaIP.isSet())
-          CGF.AllocaInsertPt = &*AllocaIP.getPoint();
-
-        // TODO: Remove the call, after making sure the counter is not used by
-        //       the EHStack.
-        // Since this is an inlined region, it should not modify the
-        // ReturnBlock, and should reuse the one for the enclosing outlined
-        // region. So, the JumpDest being return by the function is discarded
-        (void)CGF.getJumpDestInCurrentScope(&FiniBB);
-      }
-
-      ~InlinedRegionBodyRAII() { CGF.AllocaInsertPt = OldAllocaIP; }
-    };
-  };
-
   CodeGenModule &CGM;  // Per-module state.
   const TargetInfo &Target;
+
+  // For EH/SEH outlined funclets, this field points to parent's CGF
+  CodeGenFunction *ParentCGF = nullptr;
 
   typedef std::pair<llvm::Value *, llvm::Value *> ComplexPairTy;
   LoopInfoStack LoopStack;
@@ -604,6 +502,26 @@ public:
   /// True if the current statement has nomerge attribute.
   bool InNoMergeAttributedStmt = false;
 
+  /// True if the current function should be marked mustprogress.
+  bool FnIsMustProgress = false;
+
+  /// True if the C++ Standard Requires Progress.
+  bool CPlusPlusWithProgress() {
+    return getLangOpts().CPlusPlus11 || getLangOpts().CPlusPlus14 ||
+           getLangOpts().CPlusPlus17 || getLangOpts().CPlusPlus20;
+  }
+
+  /// True if the C Standard Requires Progress.
+  bool CWithProgress() {
+    return getLangOpts().C11 || getLangOpts().C17 || getLangOpts().C2x;
+  }
+
+  /// True if the language standard requires progress in functions or
+  /// in infinite loops with non-constant conditionals.
+  bool LanguageRequiresProgress() {
+    return CWithProgress() || CPlusPlusWithProgress();
+  }
+
   const CodeGen::CGBlockInfo *BlockInfo = nullptr;
   llvm::Value *BlockPointer = nullptr;
 
@@ -710,11 +628,15 @@ public:
   class CGFPOptionsRAII {
   public:
     CGFPOptionsRAII(CodeGenFunction &CGF, FPOptions FPFeatures);
+    CGFPOptionsRAII(CodeGenFunction &CGF, const Expr *E);
     ~CGFPOptionsRAII();
 
   private:
+    void ConstructorHelper(FPOptions FPFeatures);
     CodeGenFunction &CGF;
     FPOptions OldFPFeatures;
+    llvm::fp::ExceptionBehavior OldExcept;
+    llvm::RoundingMode OldRounding;
     Optional<CGBuilderTy::FastMathFlagGuard> FMFGuard;
   };
   FPOptions CurFPFeatures;
@@ -774,12 +696,13 @@ public:
     initFullExprCleanup();
   }
 
-  /// Queue a cleanup to be pushed after finishing the current
-  /// full-expression.
+  /// Queue a cleanup to be pushed after finishing the current full-expression,
+  /// potentially with an active flag.
   template <class T, class... As>
   void pushCleanupAfterFullExpr(CleanupKind Kind, As... A) {
     if (!isInConditionalBranch())
-      return pushCleanupAfterFullExprImpl<T>(Kind, Address::invalid(), A...);
+      return pushCleanupAfterFullExprWithActiveFlag<T>(Kind, Address::invalid(),
+                                                       A...);
 
     Address ActiveFlag = createCleanupActiveFlag();
     assert(!DominatingValue<Address>::needsSaving(ActiveFlag) &&
@@ -789,12 +712,12 @@ public:
     SavedTuple Saved{saveValueInCond(A)...};
 
     typedef EHScopeStack::ConditionalCleanup<T, As...> CleanupType;
-    pushCleanupAfterFullExprImpl<CleanupType>(Kind, ActiveFlag, Saved);
+    pushCleanupAfterFullExprWithActiveFlag<CleanupType>(Kind, ActiveFlag, Saved);
   }
 
   template <class T, class... As>
-  void pushCleanupAfterFullExprImpl(CleanupKind Kind, Address ActiveFlag,
-                                    As... A) {
+  void pushCleanupAfterFullExprWithActiveFlag(CleanupKind Kind,
+                                              Address ActiveFlag, As... A) {
     LifetimeExtendedCleanupHeader Header = {sizeof(T), Kind,
                                             ActiveFlag.isValid()};
 
@@ -1496,13 +1419,24 @@ private:
   };
   OpenMPCancelExitStack OMPCancelStack;
 
+  /// Calculate branch weights for the likelihood attribute
+  llvm::MDNode *createBranchWeights(Stmt::Likelihood LH) const;
+
   CodeGenPGO PGO;
 
   /// Calculate branch weights appropriate for PGO data
-  llvm::MDNode *createProfileWeights(uint64_t TrueCount, uint64_t FalseCount);
-  llvm::MDNode *createProfileWeights(ArrayRef<uint64_t> Weights);
+  llvm::MDNode *createProfileWeights(uint64_t TrueCount,
+                                     uint64_t FalseCount) const;
+  llvm::MDNode *createProfileWeights(ArrayRef<uint64_t> Weights) const;
   llvm::MDNode *createProfileWeightsForLoop(const Stmt *Cond,
-                                            uint64_t LoopCount);
+                                            uint64_t LoopCount) const;
+
+  /// Calculate the branch weight for PGO data or the likelihood attribute.
+  /// The function tries to get the weight of \ref createProfileWeightsForLoop.
+  /// If that fails it gets the weight of \ref createBranchWeights.
+  llvm::MDNode *createProfileOrBranchWeightsForLoop(const Stmt *Cond,
+                                                    uint64_t LoopCount,
+                                                    const Stmt *Body) const;
 
 public:
   /// Increment the profiler's counter for the given statement by \p StepV.
@@ -1539,6 +1473,9 @@ private:
   llvm::SwitchInst *SwitchInsn = nullptr;
   /// The branch weights of SwitchInsn when doing instrumentation based PGO.
   SmallVector<uint64_t, 16> *SwitchWeights = nullptr;
+
+  /// The likelihood attributes of the SwitchCase.
+  SmallVector<Stmt::Likelihood, 16> *SwitchLikelihood = nullptr;
 
   /// CaseRangeBlock - This block holds if condition check for last case
   /// statement range in current switch instruction.
@@ -1693,6 +1630,169 @@ public:
     Address OldReturnValue;
     QualType OldFnRetTy;
     CallArgList OldCXXInheritedCtorInitExprArgs;
+  };
+
+  // Helper class for the OpenMP IR Builder. Allows reusability of code used for
+  // region body, and finalization codegen callbacks. This will class will also
+  // contain privatization functions used by the privatization call backs
+  //
+  // TODO: this is temporary class for things that are being moved out of
+  // CGOpenMPRuntime, new versions of current CodeGenFunction methods, or
+  // utility function for use with the OMPBuilder. Once that move to use the
+  // OMPBuilder is done, everything here will either become part of CodeGenFunc.
+  // directly, or a new helper class that will contain functions used by both
+  // this and the OMPBuilder
+
+  struct OMPBuilderCBHelpers {
+
+    OMPBuilderCBHelpers() = delete;
+    OMPBuilderCBHelpers(const OMPBuilderCBHelpers &) = delete;
+    OMPBuilderCBHelpers &operator=(const OMPBuilderCBHelpers &) = delete;
+
+    using InsertPointTy = llvm::OpenMPIRBuilder::InsertPointTy;
+
+    /// Cleanup action for allocate support.
+    class OMPAllocateCleanupTy final : public EHScopeStack::Cleanup {
+
+    private:
+      llvm::CallInst *RTLFnCI;
+
+    public:
+      OMPAllocateCleanupTy(llvm::CallInst *RLFnCI) : RTLFnCI(RLFnCI) {
+        RLFnCI->removeFromParent();
+      }
+
+      void Emit(CodeGenFunction &CGF, Flags /*flags*/) override {
+        if (!CGF.HaveInsertPoint())
+          return;
+        CGF.Builder.Insert(RTLFnCI);
+      }
+    };
+
+    /// Returns address of the threadprivate variable for the current
+    /// thread. This Also create any necessary OMP runtime calls.
+    ///
+    /// \param VD VarDecl for Threadprivate variable.
+    /// \param VDAddr Address of the Vardecl
+    /// \param Loc  The location where the barrier directive was encountered
+    static Address getAddrOfThreadPrivate(CodeGenFunction &CGF,
+                                          const VarDecl *VD, Address VDAddr,
+                                          SourceLocation Loc);
+
+    /// Gets the OpenMP-specific address of the local variable /p VD.
+    static Address getAddressOfLocalVariable(CodeGenFunction &CGF,
+                                             const VarDecl *VD);
+    /// Get the platform-specific name separator.
+    /// \param Parts different parts of the final name that needs separation
+    /// \param FirstSeparator First separator used between the initial two
+    ///        parts of the name.
+    /// \param Separator separator used between all of the rest consecutinve
+    ///        parts of the name
+    static std::string getNameWithSeparators(ArrayRef<StringRef> Parts,
+                                             StringRef FirstSeparator = ".",
+                                             StringRef Separator = ".");
+    /// Emit the Finalization for an OMP region
+    /// \param CGF	The Codegen function this belongs to
+    /// \param IP	Insertion point for generating the finalization code.
+    static void FinalizeOMPRegion(CodeGenFunction &CGF, InsertPointTy IP) {
+      CGBuilderTy::InsertPointGuard IPG(CGF.Builder);
+      assert(IP.getBlock()->end() != IP.getPoint() &&
+             "OpenMP IR Builder should cause terminated block!");
+
+      llvm::BasicBlock *IPBB = IP.getBlock();
+      llvm::BasicBlock *DestBB = IPBB->getUniqueSuccessor();
+      assert(DestBB && "Finalization block should have one successor!");
+
+      // erase and replace with cleanup branch.
+      IPBB->getTerminator()->eraseFromParent();
+      CGF.Builder.SetInsertPoint(IPBB);
+      CodeGenFunction::JumpDest Dest = CGF.getJumpDestInCurrentScope(DestBB);
+      CGF.EmitBranchThroughCleanup(Dest);
+    }
+
+    /// Emit the body of an OMP region
+    /// \param CGF	The Codegen function this belongs to
+    /// \param RegionBodyStmt	The body statement for the OpenMP region being
+    /// 			 generated
+    /// \param CodeGenIP	Insertion point for generating the body code.
+    /// \param FiniBB	The finalization basic block
+    static void EmitOMPRegionBody(CodeGenFunction &CGF,
+                                  const Stmt *RegionBodyStmt,
+                                  InsertPointTy CodeGenIP,
+                                  llvm::BasicBlock &FiniBB) {
+      llvm::BasicBlock *CodeGenIPBB = CodeGenIP.getBlock();
+      if (llvm::Instruction *CodeGenIPBBTI = CodeGenIPBB->getTerminator())
+        CodeGenIPBBTI->eraseFromParent();
+
+      CGF.Builder.SetInsertPoint(CodeGenIPBB);
+
+      CGF.EmitStmt(RegionBodyStmt);
+
+      if (CGF.Builder.saveIP().isSet())
+        CGF.Builder.CreateBr(&FiniBB);
+    }
+
+    /// RAII for preserving necessary info during Outlined region body codegen.
+    class OutlinedRegionBodyRAII {
+
+      llvm::AssertingVH<llvm::Instruction> OldAllocaIP;
+      CodeGenFunction::JumpDest OldReturnBlock;
+      CGBuilderTy::InsertPoint IP;
+      CodeGenFunction &CGF;
+
+    public:
+      OutlinedRegionBodyRAII(CodeGenFunction &cgf, InsertPointTy &AllocaIP,
+                             llvm::BasicBlock &RetBB)
+          : CGF(cgf) {
+        assert(AllocaIP.isSet() &&
+               "Must specify Insertion point for allocas of outlined function");
+        OldAllocaIP = CGF.AllocaInsertPt;
+        CGF.AllocaInsertPt = &*AllocaIP.getPoint();
+        IP = CGF.Builder.saveIP();
+
+        OldReturnBlock = CGF.ReturnBlock;
+        CGF.ReturnBlock = CGF.getJumpDestInCurrentScope(&RetBB);
+      }
+
+      ~OutlinedRegionBodyRAII() {
+        CGF.AllocaInsertPt = OldAllocaIP;
+        CGF.ReturnBlock = OldReturnBlock;
+        CGF.Builder.restoreIP(IP);
+      }
+    };
+
+    /// RAII for preserving necessary info during inlined region body codegen.
+    class InlinedRegionBodyRAII {
+
+      llvm::AssertingVH<llvm::Instruction> OldAllocaIP;
+      CodeGenFunction &CGF;
+
+    public:
+      InlinedRegionBodyRAII(CodeGenFunction &cgf, InsertPointTy &AllocaIP,
+                            llvm::BasicBlock &FiniBB)
+          : CGF(cgf) {
+        // Alloca insertion block should be in the entry block of the containing
+        // function so it expects an empty AllocaIP in which case will reuse the
+        // old alloca insertion point, or a new AllocaIP in the same block as
+        // the old one
+        assert((!AllocaIP.isSet() ||
+                CGF.AllocaInsertPt->getParent() == AllocaIP.getBlock()) &&
+               "Insertion point should be in the entry block of containing "
+               "function!");
+        OldAllocaIP = CGF.AllocaInsertPt;
+        if (AllocaIP.isSet())
+          CGF.AllocaInsertPt = &*AllocaIP.getPoint();
+
+        // TODO: Remove the call, after making sure the counter is not used by
+        //       the EHStack.
+        // Since this is an inlined region, it should not modify the
+        // ReturnBlock, and should reuse the one for the enclosing outlined
+        // region. So, the JumpDest being return by the function is discarded
+        (void)CGF.getJumpDestInCurrentScope(&FiniBB);
+      }
+
+      ~InlinedRegionBodyRAII() { CGF.AllocaInsertPt = OldAllocaIP; }
+    };
   };
 
 private:
@@ -3013,7 +3113,7 @@ public:
   /// statements.
   ///
   /// \return True if the statement was handled.
-  bool EmitSimpleStmt(const Stmt *S);
+  bool EmitSimpleStmt(const Stmt *S, ArrayRef<const Attr *> Attrs);
 
   Address EmitCompoundStmt(const CompoundStmt &S, bool GetLast = false,
                            AggValueSlot AVS = AggValueSlot::ignored());
@@ -3042,9 +3142,9 @@ public:
   void EmitBreakStmt(const BreakStmt &S);
   void EmitContinueStmt(const ContinueStmt &S);
   void EmitSwitchStmt(const SwitchStmt &S);
-  void EmitDefaultStmt(const DefaultStmt &S);
-  void EmitCaseStmt(const CaseStmt &S);
-  void EmitCaseStmtRange(const CaseStmt &S);
+  void EmitDefaultStmt(const DefaultStmt &S, ArrayRef<const Attr *> Attrs);
+  void EmitCaseStmt(const CaseStmt &S, ArrayRef<const Attr *> Attrs);
+  void EmitCaseStmtRange(const CaseStmt &S, ArrayRef<const Attr *> Attrs);
   void EmitAsmStmt(const AsmStmt &S);
 
   void EmitObjCForCollectionStmt(const ObjCForCollectionStmt &S);
@@ -3273,12 +3373,15 @@ public:
     Address BasePointersArray = Address::invalid();
     Address PointersArray = Address::invalid();
     Address SizesArray = Address::invalid();
+    Address MappersArray = Address::invalid();
     unsigned NumberOfTargetItems = 0;
     explicit OMPTargetDataInfo() = default;
     OMPTargetDataInfo(Address BasePointersArray, Address PointersArray,
-                      Address SizesArray, unsigned NumberOfTargetItems)
+                      Address SizesArray, Address MappersArray,
+                      unsigned NumberOfTargetItems)
         : BasePointersArray(BasePointersArray), PointersArray(PointersArray),
-          SizesArray(SizesArray), NumberOfTargetItems(NumberOfTargetItems) {}
+          SizesArray(SizesArray), MappersArray(MappersArray),
+          NumberOfTargetItems(NumberOfTargetItems) {}
   };
   void EmitOMPTargetTaskBasedDirective(const OMPExecutableDirective &S,
                                        const RegionCodeGenTy &BodyGen,
@@ -3500,6 +3603,9 @@ public:
   //===--------------------------------------------------------------------===//
   //                         LValue Expression Emission
   //===--------------------------------------------------------------------===//
+
+  /// Create a check that a scalar RValue is non-null.
+  llvm::Value *EmitNonNullRValueCheck(RValue RV, QualType T);
 
   /// GetUndefRValue - Get an appropriate 'undef' rvalue for the given type.
   RValue GetUndefRValue(QualType Ty);
@@ -3923,7 +4029,6 @@ public:
                                    QualType RTy);
   llvm::Value *EmitCMSEClearRecord(llvm::Value *V, llvm::ArrayType *ATy,
                                    QualType RTy);
-  llvm::Value *EmitCMSEClearFP16(llvm::Value *V);
 
   llvm::Value *EmitCommonNeonBuiltinExpr(unsigned BuiltinID,
                                          unsigned LLVMIntrinsic,
@@ -3956,6 +4061,7 @@ public:
   llvm::Type *SVEBuiltinMemEltTy(SVETypeFlags TypeFlags);
 
   SmallVector<llvm::Type *, 2> getSVEOverloadTypes(SVETypeFlags TypeFlags,
+                                                   llvm::Type *ReturnType,
                                                    ArrayRef<llvm::Value *> Ops);
   llvm::Type *getEltType(SVETypeFlags TypeFlags);
   llvm::ScalableVectorType *getSVEType(const SVETypeFlags &TypeFlags);
@@ -3990,6 +4096,11 @@ public:
   llvm::Value *EmitSVEGatherPrefetch(SVETypeFlags TypeFlags,
                                      SmallVectorImpl<llvm::Value *> &Ops,
                                      unsigned IntID);
+  llvm::Value *EmitSVEStructLoad(SVETypeFlags TypeFlags,
+                                 SmallVectorImpl<llvm::Value *> &Ops, unsigned IntID);
+  llvm::Value *EmitSVEStructStore(SVETypeFlags TypeFlags,
+                                  SmallVectorImpl<llvm::Value *> &Ops,
+                                  unsigned IntID);
   llvm::Value *EmitAArch64SVEBuiltinExpr(unsigned BuiltinID, const CallExpr *E);
 
   llvm::Value *EmitAArch64BuiltinExpr(unsigned BuiltinID, const CallExpr *E,
@@ -4015,7 +4126,7 @@ private:
 public:
   llvm::Value *EmitMSVCBuiltinExpr(MSVCIntrin BuiltinID, const CallExpr *E);
 
-  llvm::Value *EmitBuiltinAvailable(ArrayRef<llvm::Value *> Args);
+  llvm::Value *EmitBuiltinAvailable(const VersionTuple &Version);
 
   llvm::Value *EmitObjCProtocolExpr(const ObjCProtocolExpr *E);
   llvm::Value *EmitObjCStringLiteral(const ObjCStringLiteral *E);
@@ -4192,6 +4303,9 @@ public:
   /// Call atexit() with function dtorStub.
   void registerGlobalDtorWithAtExit(llvm::Constant *dtorStub);
 
+  /// Call unatexit() with function dtorStub.
+  llvm::Value *unregisterGlobalDtorWithUnAtExit(llvm::Function *dtorStub);
+
   /// Emit code in this function to perform a guarded variable
   /// initialization.  Guarded initializations are used when it's not
   /// possible to prove that an initialization will be done exactly
@@ -4215,12 +4329,12 @@ public:
                             ArrayRef<llvm::Function *> CXXThreadLocals,
                             ConstantAddress Guard = ConstantAddress::invalid());
 
-  /// GenerateCXXGlobalDtorsFunc - Generates code for destroying global
+  /// GenerateCXXGlobalCleanUpFunc - Generates code for cleaning up global
   /// variables.
-  void GenerateCXXGlobalDtorsFunc(
+  void GenerateCXXGlobalCleanUpFunc(
       llvm::Function *Fn,
       const std::vector<std::tuple<llvm::FunctionType *, llvm::WeakTrackingVH,
-                                   llvm::Constant *>> &DtorsAndObjects);
+                                   llvm::Constant *>> &DtorsOrStermFinalizers);
 
   void GenerateCXXGlobalVarDeclInitFunc(llvm::Function *Fn,
                                         const VarDecl *D,
@@ -4243,7 +4357,8 @@ public:
   llvm::Value *EmitAnnotationCall(llvm::Function *AnnotationFn,
                                   llvm::Value *AnnotatedVal,
                                   StringRef AnnotationStr,
-                                  SourceLocation Location);
+                                  SourceLocation Location,
+                                  const AnnotateAttr *Attr);
 
   /// Emit local annotations for the local variable V, declared by D.
   void EmitVarAnnotations(const VarDecl *D, llvm::Value *V);
@@ -4288,7 +4403,8 @@ public:
   /// TrueCount should be the number of times we expect the condition to
   /// evaluate to true based on PGO data.
   void EmitBranchOnBoolExpr(const Expr *Cond, llvm::BasicBlock *TrueBlock,
-                            llvm::BasicBlock *FalseBlock, uint64_t TrueCount);
+                            llvm::BasicBlock *FalseBlock, uint64_t TrueCount,
+                            Stmt::Likelihood LH = Stmt::LH_None);
 
   /// Given an assignment `*LHS = RHS`, emit a test that checks if \p RHS is
   /// nonnull, if \p LHS is marked _Nonnull.
@@ -4601,6 +4717,77 @@ private:
   llvm::Value *EmitX86CpuSupports(uint64_t Mask);
   llvm::Value *EmitX86CpuInit();
   llvm::Value *FormResolverCondition(const MultiVersionResolverOption &RO);
+};
+
+/// TargetFeatures - This class is used to check whether the builtin function
+/// has the required tagert specific features. It is able to support the
+/// combination of ','(and), '|'(or), and '()'. By default, the priority of
+/// ',' is higher than that of '|' .
+/// E.g:
+/// A,B|C means the builtin function requires both A and B, or C.
+/// If we want the builtin function requires both A and B, or both A and C,
+/// there are two ways: A,B|A,C or A,(B|C).
+/// The FeaturesList should not contain spaces, and brackets must appear in
+/// pairs.
+class TargetFeatures {
+  struct FeatureListStatus {
+    bool HasFeatures;
+    StringRef CurFeaturesList;
+  };
+
+  const llvm::StringMap<bool> &CallerFeatureMap;
+
+  FeatureListStatus getAndFeatures(StringRef FeatureList) {
+    int InParentheses = 0;
+    bool HasFeatures = true;
+    size_t SubexpressionStart = 0;
+    for (size_t i = 0, e = FeatureList.size(); i < e; ++i) {
+      char CurrentToken = FeatureList[i];
+      switch (CurrentToken) {
+      default:
+        break;
+      case '(':
+        if (InParentheses == 0)
+          SubexpressionStart = i + 1;
+        ++InParentheses;
+        break;
+      case ')':
+        --InParentheses;
+        assert(InParentheses >= 0 && "Parentheses are not in pair");
+        LLVM_FALLTHROUGH;
+      case '|':
+      case ',':
+        if (InParentheses == 0) {
+          if (HasFeatures && i != SubexpressionStart) {
+            StringRef F = FeatureList.slice(SubexpressionStart, i);
+            HasFeatures = CurrentToken == ')' ? hasRequiredFeatures(F)
+                                              : CallerFeatureMap.lookup(F);
+          }
+          SubexpressionStart = i + 1;
+          if (CurrentToken == '|') {
+            return {HasFeatures, FeatureList.substr(SubexpressionStart)};
+          }
+        }
+        break;
+      }
+    }
+    assert(InParentheses == 0 && "Parentheses are not in pair");
+    if (HasFeatures && SubexpressionStart != FeatureList.size())
+      HasFeatures =
+          CallerFeatureMap.lookup(FeatureList.substr(SubexpressionStart));
+    return {HasFeatures, StringRef()};
+  }
+
+public:
+  bool hasRequiredFeatures(StringRef FeatureList) {
+    FeatureListStatus FS = {false, FeatureList};
+    while (!FS.HasFeatures && !FS.CurFeaturesList.empty())
+      FS = getAndFeatures(FS.CurFeaturesList);
+    return FS.HasFeatures;
+  }
+
+  TargetFeatures(const llvm::StringMap<bool> &CallerFeatureMap)
+      : CallerFeatureMap(CallerFeatureMap) {}
 };
 
 inline DominatingLLVMValue::saved_type

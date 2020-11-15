@@ -37,10 +37,10 @@ link, or use, to the symbol. An example of a `Symbol` operation is
 
 ### Defining a Symbol
 
-A `Symbol` operation may use the `OpTrait::Symbol` trait to provide the
-necessary verification and accessors, but this is not required as some
-operations, such as `module`, conditionally define a symbol. `Symbol`s must have
-the following properties:
+A `Symbol` operation should use the `SymbolOpInterface` interface to provide the
+necessary verification and accessors; it also supports
+operations, such as `module`, that conditionally define a symbol. `Symbol`s must
+have the following properties:
 
 *   A `StringAttr` attribute named
     'SymbolTable::getSymbolAttrName()'(`sym_name`).
@@ -142,6 +142,10 @@ See the `LangRef` definition of the
 [`SymbolRefAttr`](LangRef.md#symbol-reference-attribute) for more information
 about the structure of this attribute.
 
+Operations that reference a `Symbol` and want to perform verification and
+general mutation of the symbol should implement the `SymbolUserOpInterface` to
+ensure that symbol accesses are legal and efficient.
+
 ### Manipulating a Symbol
 
 As described above, `SymbolRefs` act as an auxiliary way of defining uses of
@@ -190,20 +194,21 @@ symbol has one of the following visibilities:
         table, but not outside of the visible IR, as long as each symbol table
         parent also defines a non-private symbol.
 
-A few examples of what this looks like in the IR are shown below:
+For Functions, the visibility is printed after the operation name without a
+quote. A few examples of what this looks like in the IR are shown below:
 
 ```mlir
 module @public_module {
   // This function can be accessed by 'live.user', but cannot be referenced
   // externally; all uses are known to reside within parent regions.
-  func @nested_function() attributes { sym_visibility = "nested" }
+  func nested @nested_function()
 
   // This function cannot be accessed outside of 'public_module'.
-  func @private_function() attributes { sym_visibility = "private" }
+  func private @private_function()
 }
 
 // This function can only be accessed from within the top-level module.
-func @private_function() attributes { sym_visibility = "private" }
+func private @private_function()
 
 // This function may be referenced externally.
 func @public_function()

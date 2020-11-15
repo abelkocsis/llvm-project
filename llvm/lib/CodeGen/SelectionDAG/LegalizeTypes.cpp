@@ -753,7 +753,10 @@ void DAGTypeLegalizer::SetScalarizedVector(SDValue Op, SDValue Result) {
   // Note that in some cases vector operation operands may be greater than
   // the vector element type. For example BUILD_VECTOR of type <1 x i1> with
   // a constant i8 operand.
-  assert(Result.getValueSizeInBits() >= Op.getScalarValueSizeInBits() &&
+
+  // We don't currently support the scalarization of scalable vector types.
+  assert(Result.getValueSizeInBits().getFixedSize() >=
+             Op.getScalarValueSizeInBits() &&
          "Invalid type for scalarized vector");
   AnalyzeNewValue(Result);
 
@@ -835,9 +838,9 @@ void DAGTypeLegalizer::GetSplitVector(SDValue Op, SDValue &Lo,
 void DAGTypeLegalizer::SetSplitVector(SDValue Op, SDValue Lo,
                                       SDValue Hi) {
   assert(Lo.getValueType().getVectorElementType() ==
-         Op.getValueType().getVectorElementType() &&
-         2*Lo.getValueType().getVectorNumElements() ==
-         Op.getValueType().getVectorNumElements() &&
+             Op.getValueType().getVectorElementType() &&
+         Lo.getValueType().getVectorElementCount() * 2 ==
+             Op.getValueType().getVectorElementCount() &&
          Hi.getValueType() == Lo.getValueType() &&
          "Invalid type for split vector");
   // Lo/Hi may have been newly allocated, if so, add nodeid's as relevant.
@@ -955,11 +958,12 @@ bool DAGTypeLegalizer::CustomWidenLowerNode(SDNode *N, EVT VT) {
   assert(Results.size() == N->getNumValues() &&
          "Custom lowering returned the wrong number of results!");
   for (unsigned i = 0, e = Results.size(); i != e; ++i) {
-    // If this is a chain output just replace it.
-    if (Results[i].getValueType() == MVT::Other)
-      ReplaceValueWith(SDValue(N, i), Results[i]);
-    else
+    // If this is a chain output or already widened just replace it.
+    bool WasWidened = SDValue(N, i).getValueType() != Results[i].getValueType();
+    if (WasWidened)
       SetWidenedVector(SDValue(N, i), Results[i]);
+    else
+      ReplaceValueWith(SDValue(N, i), Results[i]);
   }
   return true;
 }

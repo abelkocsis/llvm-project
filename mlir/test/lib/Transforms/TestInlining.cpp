@@ -6,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// TODO(riverriddle) This pass is only necessary because the main inlining pass
+// TODO: This pass is only necessary because the main inlining pass
 // has no abstracted away the call+callee relationship. When the inlining
 // interface has this support, this pass should be removed.
 //
@@ -22,6 +22,7 @@
 #include "llvm/ADT/StringSet.h"
 
 using namespace mlir;
+using namespace mlir::test;
 
 namespace {
 struct Inliner : public PassWrapper<Inliner, FunctionPass> {
@@ -61,7 +62,9 @@ struct Inliner : public PassWrapper<Inliner, FunctionPass> {
 } // end anonymous namespace
 
 namespace mlir {
+namespace test {
 void registerInliner() {
   PassRegistration<Inliner>("test-inline", "Test inlining region calls");
 }
+} // namespace test
 } // namespace mlir

@@ -29,6 +29,8 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/ManagedStatic.h"
+#include "llvm/Support/Regex.h"
+#include "llvm/Support/WithColor.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <cassert>
@@ -189,6 +191,10 @@ private:
 
 static llvm::ManagedStatic<TrueMatcherImpl> TrueMatcherInstance;
 
+bool ASTMatchFinder::isTraversalAsIs() const {
+  return getASTContext().getParentMapContext().getTraversalKind() == TK_AsIs;
+}
+
 DynTypedMatcher
 DynTypedMatcher::constructVariadic(DynTypedMatcher::VariadicOperator Op,
                                    ASTNodeKind SupportedKind,
@@ -282,6 +288,10 @@ bool DynTypedMatcher::matches(const DynTypedNode &DynNode,
   TraversalKindScope RAII(Finder->getASTContext(),
                           Implementation->TraversalKind());
 
+  if (!Finder->isTraversalAsIs() &&
+      Finder->IsMatchingInTemplateInstantiationNotSpelledInSource())
+    return false;
+
   auto N =
       Finder->getASTContext().getParentMapContext().traverseIgnored(DynNode);
 
@@ -301,6 +311,10 @@ bool DynTypedMatcher::matchesNoKindCheck(const DynTypedNode &DynNode,
                                          BoundNodesTreeBuilder *Builder) const {
   TraversalKindScope raii(Finder->getASTContext(),
                           Implementation->TraversalKind());
+
+  if (!Finder->isTraversalAsIs() &&
+      Finder->IsMatchingInTemplateInstantiationNotSpelledInSource())
+    return false;
 
   auto N =
       Finder->getASTContext().getParentMapContext().traverseIgnored(DynNode);
@@ -616,13 +630,10 @@ bool HasNameMatcher::matchesNodeFullSlow(const NamedDecl &Node) const {
     llvm::SmallString<128> NodeName = StringRef("::");
     llvm::raw_svector_ostream OS(NodeName);
 
-    if (SkipUnwritten) {
-      PrintingPolicy Policy = Node.getASTContext().getPrintingPolicy();
-      Policy.SuppressUnwrittenScope = true;
-      Node.printQualifiedName(OS, Policy);
-    } else {
-      Node.printQualifiedName(OS);
-    }
+    PrintingPolicy Policy = Node.getASTContext().getPrintingPolicy();
+    Policy.SuppressUnwrittenScope = SkipUnwritten;
+    Policy.SuppressInlineNamespace = SkipUnwritten;
+    Node.printQualifiedName(OS, Policy);
 
     const StringRef FullName = OS.str();
 
@@ -682,6 +693,19 @@ getExpansionLocOfMacro(StringRef MacroName, SourceLocation Loc,
   return llvm::None;
 }
 
+std::shared_ptr<llvm::Regex> createAndVerifyRegex(StringRef Regex,
+                                                  llvm::Regex::RegexFlags Flags,
+                                                  StringRef MatcherID) {
+  assert(!Regex.empty() && "Empty regex string");
+  auto SharedRegex = std::make_shared<llvm::Regex>(Regex, Flags);
+  std::string Error;
+  if (!SharedRegex->isValid(Error)) {
+    llvm::WithColor::error()
+        << "building matcher '" << MatcherID << "': " << Error << "\n";
+    llvm::WithColor::note() << " input was '" << Regex << "'\n";
+  }
+  return SharedRegex;
+}
 } // end namespace internal
 
 const internal::VariadicDynCastAllOfMatcher<Stmt, ObjCAutoreleasePoolStmt>
@@ -695,6 +719,7 @@ const internal::VariadicDynCastAllOfMatcher<Decl, TypeAliasDecl> typeAliasDecl;
 const internal::VariadicDynCastAllOfMatcher<Decl, TypeAliasTemplateDecl>
     typeAliasTemplateDecl;
 const internal::VariadicAllOfMatcher<Decl> decl;
+const internal::VariadicAllOfMatcher<DecompositionDecl> decompositionDecl;
 const internal::VariadicDynCastAllOfMatcher<Decl, LinkageSpecDecl>
     linkageSpecDecl;
 const internal::VariadicDynCastAllOfMatcher<Decl, NamedDecl> namedDecl;
@@ -719,11 +744,15 @@ const internal::VariadicDynCastAllOfMatcher<Decl, AccessSpecDecl>
     accessSpecDecl;
 const internal::VariadicAllOfMatcher<CXXCtorInitializer> cxxCtorInitializer;
 const internal::VariadicAllOfMatcher<TemplateArgument> templateArgument;
+const internal::VariadicAllOfMatcher<TemplateArgumentLoc> templateArgumentLoc;
 const internal::VariadicAllOfMatcher<TemplateName> templateName;
 const internal::VariadicDynCastAllOfMatcher<Decl, NonTypeTemplateParmDecl>
     nonTypeTemplateParmDecl;
 const internal::VariadicDynCastAllOfMatcher<Decl, TemplateTypeParmDecl>
     templateTypeParmDecl;
+const internal::VariadicDynCastAllOfMatcher<Decl, TemplateTemplateParmDecl>
+    templateTemplateParmDecl;
+
 const internal::VariadicAllOfMatcher<QualType> qualType;
 const internal::VariadicAllOfMatcher<Type> type;
 const internal::VariadicAllOfMatcher<TypeLoc> typeLoc;

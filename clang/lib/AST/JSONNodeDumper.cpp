@@ -74,6 +74,7 @@ void JSONNodeDumper::Visit(const Type *T) {
 
   JOS.attribute("kind", (llvm::Twine(T->getTypeClassName()) + "Type").str());
   JOS.attribute("type", createQualType(QualType(T, 0), /*Desugar*/ false));
+  attributeOnlyIfTrue("containsErrors", T->containsErrors());
   attributeOnlyIfTrue("isDependent", T->isDependentType());
   attributeOnlyIfTrue("isInstantiationDependent",
                       T->isInstantiationDependentType());
@@ -180,6 +181,13 @@ void JSONNodeDumper::Visit(const BlockDecl::Capture &C) {
 void JSONNodeDumper::Visit(const GenericSelectionExpr::ConstAssociation &A) {
   JOS.attribute("associationKind", A.getTypeSourceInfo() ? "case" : "default");
   attributeOnlyIfTrue("selected", A.isSelected());
+}
+
+void JSONNodeDumper::Visit(const APValue &Value, QualType Ty) {
+  std::string Str;
+  llvm::raw_string_ostream OS(Str);
+  Value.printPretty(OS, Ctx, Ty);
+  JOS.attribute("value", OS.str());
 }
 
 void JSONNodeDumper::writeIncludeStack(PresumedLoc Loc, bool JustFirst) {
@@ -607,6 +615,12 @@ void JSONNodeDumper::VisitVectorType(const VectorType *VT) {
     break;
   case VectorType::NeonPolyVector:
     JOS.attribute("vectorKind", "neon poly");
+    break;
+  case VectorType::SveFixedLengthDataVector:
+    JOS.attribute("vectorKind", "fixed-length sve data vector");
+    break;
+  case VectorType::SveFixedLengthPredicateVector:
+    JOS.attribute("vectorKind", "fixed-length sve predicate vector");
     break;
   }
 }
@@ -1271,12 +1285,8 @@ void JSONNodeDumper::VisitCXXTypeidExpr(const CXXTypeidExpr *CTE) {
 }
 
 void JSONNodeDumper::VisitConstantExpr(const ConstantExpr *CE) {
-  if (CE->getResultAPValueKind() != APValue::None) {
-    std::string Str;
-    llvm::raw_string_ostream OS(Str);
-    CE->getAPValueResult().printPretty(OS, Ctx, CE->getType());
-    JOS.attribute("value", OS.str());
-  }
+  if (CE->getResultAPValueKind() != APValue::None)
+    Visit(CE->getAPValueResult(), CE->getType());
 }
 
 void JSONNodeDumper::VisitInitListExpr(const InitListExpr *ILE) {

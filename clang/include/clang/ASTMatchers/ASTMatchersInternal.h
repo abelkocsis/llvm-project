@@ -40,7 +40,6 @@
 #include "clang/AST/DeclFriend.h"
 #include "clang/AST/DeclTemplate.h"
 #include "clang/AST/Expr.h"
-#include "clang/AST/ExprObjC.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/ExprObjC.h"
 #include "clang/AST/NestedNameSpecifier.h"
@@ -61,11 +60,13 @@
 #include "llvm/ADT/iterator.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/ManagedStatic.h"
+#include "llvm/Support/Regex.h"
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -585,6 +586,10 @@ public:
       return this->InnerMatcher.matches(DynTypedNode::create(*Node), Finder,
                                         Builder);
     }
+
+    llvm::Optional<clang::TraversalKind> TraversalKind() const override {
+      return this->InnerMatcher.getTraversalKind();
+    }
   };
 
 private:
@@ -631,33 +636,33 @@ inline Matcher<QualType> DynTypedMatcher::convertTo<QualType>() const {
 
 /// Finds the first node in a range that matches the given matcher.
 template <typename MatcherT, typename IteratorT>
-bool matchesFirstInRange(const MatcherT &Matcher, IteratorT Start,
-                         IteratorT End, ASTMatchFinder *Finder,
-                         BoundNodesTreeBuilder *Builder) {
+IteratorT matchesFirstInRange(const MatcherT &Matcher, IteratorT Start,
+                              IteratorT End, ASTMatchFinder *Finder,
+                              BoundNodesTreeBuilder *Builder) {
   for (IteratorT I = Start; I != End; ++I) {
     BoundNodesTreeBuilder Result(*Builder);
     if (Matcher.matches(*I, Finder, &Result)) {
       *Builder = std::move(Result);
-      return true;
+      return I;
     }
   }
-  return false;
+  return End;
 }
 
 /// Finds the first node in a pointer range that matches the given
 /// matcher.
 template <typename MatcherT, typename IteratorT>
-bool matchesFirstInPointerRange(const MatcherT &Matcher, IteratorT Start,
-                                IteratorT End, ASTMatchFinder *Finder,
-                                BoundNodesTreeBuilder *Builder) {
+IteratorT matchesFirstInPointerRange(const MatcherT &Matcher, IteratorT Start,
+                                     IteratorT End, ASTMatchFinder *Finder,
+                                     BoundNodesTreeBuilder *Builder) {
   for (IteratorT I = Start; I != End; ++I) {
     BoundNodesTreeBuilder Result(*Builder);
     if (Matcher.matches(**I, Finder, &Result)) {
       *Builder = std::move(Result);
-      return true;
+      return I;
     }
   }
-  return false;
+  return End;
 }
 
 // Metafunction to determine if type T has a member called getDecl.
@@ -937,14 +942,13 @@ private:
 template <typename T>
 struct IsBaseType {
   static const bool value =
-      std::is_same<T, Decl>::value ||
-      std::is_same<T, Stmt>::value ||
-      std::is_same<T, QualType>::value ||
-      std::is_same<T, Type>::value ||
+      std::is_same<T, Decl>::value || std::is_same<T, Stmt>::value ||
+      std::is_same<T, QualType>::value || std::is_same<T, Type>::value ||
       std::is_same<T, TypeLoc>::value ||
       std::is_same<T, NestedNameSpecifier>::value ||
       std::is_same<T, NestedNameSpecifierLoc>::value ||
-      std::is_same<T, CXXCtorInitializer>::value;
+      std::is_same<T, CXXCtorInitializer>::value ||
+      std::is_same<T, TemplateArgumentLoc>::value;
 };
 template <typename T>
 const bool IsBaseType<T>::value;
@@ -1055,6 +1059,10 @@ public:
   }
 
   virtual ASTContext &getASTContext() const = 0;
+
+  virtual bool IsMatchingInTemplateInstantiationNotSpelledInSource() const = 0;
+
+  bool isTraversalAsIs() const;
 
 protected:
   virtual bool matchesChildOf(const DynTypedNode &Node, ASTContext &Ctx,
@@ -1200,6 +1208,8 @@ public:
   }
 
   llvm::Optional<clang::TraversalKind> TraversalKind() const override {
+    if (auto NestedKind = this->InnerMatcher.getTraversalKind())
+      return NestedKind;
     return Traversal;
   }
 };
@@ -1835,17 +1845,17 @@ struct NotEqualsBoundNodePredicate {
   DynTypedNode Node;
 };
 
-template <typename Ty>
-struct GetBodyMatcher {
-  static const Stmt *get(const Ty &Node) {
-    return Node.getBody();
-  }
+template <typename Ty, typename Enable = void> struct GetBodyMatcher {
+  static const Stmt *get(const Ty &Node) { return Node.getBody(); }
 };
 
-template <>
-inline const Stmt *GetBodyMatcher<FunctionDecl>::get(const FunctionDecl &Node) {
-  return Node.doesThisDeclarationHaveABody() ? Node.getBody() : nullptr;
-}
+template <typename Ty>
+struct GetBodyMatcher<Ty, typename std::enable_if<
+                              std::is_base_of<FunctionDecl, Ty>::value>::type> {
+  static const Stmt *get(const Ty &Node) {
+    return Node.doesThisDeclarationHaveABody() ? Node.getBody() : nullptr;
+  }
+};
 
 template <typename Ty>
 struct HasSizeMatcher {
@@ -1947,6 +1957,10 @@ hasAnyOverloadedOperatorNameFunc(ArrayRef<const StringRef *> NameRefs);
 bool matchesAnyBase(const CXXRecordDecl &Node,
                     const Matcher<CXXBaseSpecifier> &BaseSpecMatcher,
                     ASTMatchFinder *Finder, BoundNodesTreeBuilder *Builder);
+
+std::shared_ptr<llvm::Regex> createAndVerifyRegex(StringRef Regex,
+                                                  llvm::Regex::RegexFlags Flags,
+                                                  StringRef MatcherID);
 
 } // namespace internal
 

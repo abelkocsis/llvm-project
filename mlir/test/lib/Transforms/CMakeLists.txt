@@ -1,22 +1,30 @@
 # Exclude tests from libMLIR.so
 add_mlir_library(MLIRTestTransforms
-  TestAllReduceLowering.cpp
-  TestBufferPlacement.cpp
+  TestAffineLoopParametricTiling.cpp
+  TestExpandTanh.cpp
   TestCallGraph.cpp
   TestConstantFold.cpp
+  TestConvVectorization.cpp
+  TestConvertCallOp.cpp
   TestConvertGPUKernelToCubin.cpp
   TestConvertGPUKernelToHsaco.cpp
   TestDominance.cpp
+  TestDynamicPipeline.cpp
+  TestFinalizingBufferize.cpp
   TestLoopFusion.cpp
   TestGpuMemoryPromotion.cpp
   TestGpuParallelLoopMapping.cpp
+  TestGpuRewrite.cpp
   TestInlining.cpp
+  TestLinalgCodegenStrategy.cpp
+  TestLinalgFusionTransforms.cpp
   TestLinalgHoisting.cpp
   TestLinalgTransforms.cpp
   TestLiveness.cpp
   TestLoopMapping.cpp
   TestLoopParametricTiling.cpp
   TestLoopUnrolling.cpp
+  TestNumberOfExecutions.cpp
   TestOpaqueLoc.cpp
   TestMemRefBoundCheck.cpp
   TestMemRefDependenceCheck.cpp
@@ -31,15 +39,14 @@ add_mlir_library(MLIRTestTransforms
 
   DEPENDS
   MLIRStandardOpsIncGen
-  MLIRTestVectorTransformPatternsIncGen
 
   LINK_LIBS PUBLIC
-  MLIRAffineOps
+  MLIRAffine
   MLIRAnalysis
   MLIREDSC
   MLIRGPU
-  MLIRGPUtoGPURuntimeTransforms
-  MLIRLinalgOps
+  MLIRGPUToGPURuntimeTransforms
+  MLIRLinalg
   MLIRLinalgTransforms
   MLIRNVVMIR
   MLIRSCF
@@ -58,5 +65,3 @@ add_mlir_library(MLIRTestTransforms
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../Dialect/Test)
 include_directories(${CMAKE_CURRENT_BINARY_DIR}/../Dialect/Test)
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../DeclarativeTransforms)
-include_directories(${CMAKE_CURRENT_BINARY_DIR}/../DeclarativeTransforms)

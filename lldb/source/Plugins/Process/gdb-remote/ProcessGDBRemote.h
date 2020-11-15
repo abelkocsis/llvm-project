@@ -85,7 +85,7 @@ public:
   Status WillAttachToProcessWithName(const char *process_name,
                                      bool wait_for_launch) override;
 
-  Status DoConnectRemote(Stream *strm, llvm::StringRef remote_url) override;
+  Status DoConnectRemote(llvm::StringRef remote_url) override;
 
   Status WillLaunchOrAttach();
 
@@ -174,6 +174,8 @@ public:
   Status GetMetaData(lldb::user_id_t uid, lldb::tid_t thread_id,
                      llvm::MutableArrayRef<uint8_t> &buffer,
                      size_t offset = 0) override;
+
+  llvm::Expected<TraceTypeInfo> GetSupportedTraceType() override;
 
   Status GetTraceConfig(lldb::user_id_t uid, TraceOptions &options) override;
 

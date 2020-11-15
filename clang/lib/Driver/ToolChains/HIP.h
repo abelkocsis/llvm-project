@@ -42,6 +42,13 @@ private:
   void constructLldCommand(Compilation &C, const JobAction &JA,
                            const InputInfoList &Inputs, const InputInfo &Output,
                            const llvm::opt::ArgList &Args) const;
+
+  // Construct command for creating Object from HIP fatbin.
+  void constructGenerateObjFileFromHIPFatBinary(Compilation &C,
+                                                const InputInfo &Output,
+                                                const InputInfoList &Inputs,
+                                                const llvm::opt::ArgList &Args,
+                                                const JobAction &JA) const;
 };
 
 } // end namespace AMDGCN
@@ -92,7 +99,7 @@ public:
   computeMSVCVersion(const Driver *D,
                      const llvm::opt::ArgList &Args) const override;
 
-  unsigned GetDefaultDwarfVersion() const override { return 4; }
+  unsigned GetDefaultDwarfVersion() const override { return 5; }
 
   const ToolChain &HostTC;
 

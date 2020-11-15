@@ -11,6 +11,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "../../clang-tidy/ClangTidyCheck.h"
 #include "../../clang-tidy/ClangTidyModule.h"
 #include "../../clang-tidy/ClangTidyModuleRegistry.h"
 #include "AST.h"
@@ -48,6 +49,17 @@ using ::testing::ElementsAreArray;
 MATCHER_P(DeclNamed, Name, "") {
   if (NamedDecl *ND = dyn_cast<NamedDecl>(arg))
     if (ND->getName() == Name)
+      return true;
+  if (auto *Stream = result_listener->stream()) {
+    llvm::raw_os_ostream OS(*Stream);
+    arg->dump(OS);
+  }
+  return false;
+}
+
+MATCHER_P(DeclKind, Kind, "") {
+  if (NamedDecl *ND = dyn_cast<NamedDecl>(arg))
+    if (ND->getDeclKindName() == llvm::StringRef(Kind))
       return true;
   if (auto *Stream = result_listener->stream()) {
     llvm::raw_os_ostream OS(*Stream);
@@ -98,9 +110,15 @@ TEST(ParsedASTTest, TopLevelDecls) {
     int header1();
     int header2;
   )";
-  TU.Code = "int main();";
+  TU.Code = R"cpp(
+    int main();
+    template <typename> bool X = true;
+  )cpp";
   auto AST = TU.build();
-  EXPECT_THAT(AST.getLocalTopLevelDecls(), ElementsAre(DeclNamed("main")));
+  EXPECT_THAT(AST.getLocalTopLevelDecls(),
+              testing::UnorderedElementsAreArray(
+                  {AllOf(DeclNamed("main"), DeclKind("Function")),
+                   AllOf(DeclNamed("X"), DeclKind("VarTemplate"))}));
 }
 
 TEST(ParsedASTTest, DoesNotGetIncludedTopDecls) {
@@ -249,11 +267,11 @@ TEST(ParsedASTTest, NoCrashOnTokensWithTidyCheck) {
 }
 
 TEST(ParsedASTTest, CanBuildInvocationWithUnknownArgs) {
-  MockFSProvider FSProvider;
-  FSProvider.Files = {{testPath("foo.cpp"), "void test() {}"}};
+  MockFS FS;
+  FS.Files = {{testPath("foo.cpp"), "void test() {}"}};
   // Unknown flags should not prevent a build of compiler invocation.
   ParseInputs Inputs;
-  Inputs.FSProvider = &FSProvider;
+  Inputs.TFS = &FS;
   Inputs.CompileCommand.CommandLine = {"clang", "-fsome-unknown-flag",
                                        testPath("foo.cpp")};
   IgnoreDiagnostics IgnoreDiags;
@@ -451,7 +469,7 @@ TEST(ParsedASTTest, ReplayPreambleForTidyCheckers) {
   llvm::StringLiteral Baseline = R"cpp(
     #include "a.h"
     #include "c.h")cpp";
-  MockFSProvider FS;
+  MockFS FS;
   TU.Code = Baseline.str();
   auto Inputs = TU.inputs(FS);
   auto BaselinePreamble = TU.preamble();
@@ -539,7 +557,7 @@ TEST(ParsedASTTest, PatchesAdditionalIncludes) {
   // Build preamble with no includes.
   TU.Code = "";
   StoreDiags Diags;
-  MockFSProvider FS;
+  MockFS FS;
   auto Inputs = TU.inputs(FS);
   auto CI = buildCompilerInvocation(Inputs, Diags);
   auto EmptyPreamble =
@@ -582,7 +600,7 @@ TEST(ParsedASTTest, PatchesDeletedIncludes) {
   // Build preamble with no includes.
   TU.Code = R"cpp(#include <foo.h>)cpp";
   StoreDiags Diags;
-  MockFSProvider FS;
+  MockFS FS;
   auto Inputs = TU.inputs(FS);
   auto CI = buildCompilerInvocation(Inputs, Diags);
   auto BaselinePreamble =

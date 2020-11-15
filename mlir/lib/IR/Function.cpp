@@ -42,18 +42,16 @@ FuncOp FuncOp::create(Location location, StringRef name, FunctionType type,
 }
 
 void FuncOp::build(OpBuilder &builder, OperationState &result, StringRef name,
-                   FunctionType type, ArrayRef<NamedAttribute> attrs) {
+                   FunctionType type, ArrayRef<NamedAttribute> attrs,
+                   ArrayRef<MutableDictionaryAttr> argAttrs) {
   result.addAttribute(SymbolTable::getSymbolAttrName(),
                       builder.getStringAttr(name));
   result.addAttribute(getTypeAttrName(), TypeAttr::get(type));
   result.attributes.append(attrs.begin(), attrs.end());
   result.addRegion();
-}
 
-void FuncOp::build(OpBuilder &builder, OperationState &result, StringRef name,
-                   FunctionType type, ArrayRef<NamedAttribute> attrs,
-                   ArrayRef<MutableDictionaryAttr> argAttrs) {
-  build(builder, result, name, type, attrs);
+  if (argAttrs.empty())
+    return;
   assert(type.getNumInputs() == argAttrs.size());
   SmallString<8> argAttrName;
   for (unsigned i = 0, e = type.getNumInputs(); i != e; ++i)
@@ -98,40 +96,6 @@ LogicalResult FuncOp::verify() {
              << "function signature(" << fnInputTypes[i] << ')';
 
   return success();
-}
-
-void FuncOp::eraseArguments(ArrayRef<unsigned> argIndices) {
-  auto oldType = getType();
-  int originalNumArgs = oldType.getNumInputs();
-  llvm::BitVector eraseIndices(originalNumArgs);
-  for (auto index : argIndices)
-    eraseIndices.set(index);
-  auto shouldEraseArg = [&](int i) { return eraseIndices.test(i); };
-
-  // There are 3 things that need to be updated:
-  // - Function type.
-  // - Arg attrs.
-  // - Block arguments of entry block.
-
-  // Update the function type and arg attrs.
-  SmallVector<Type, 4> newInputTypes;
-  SmallVector<MutableDictionaryAttr, 4> newArgAttrs;
-  for (int i = 0; i < originalNumArgs; i++) {
-    if (shouldEraseArg(i))
-      continue;
-    newInputTypes.emplace_back(oldType.getInput(i));
-    newArgAttrs.emplace_back(getArgAttrDict(i));
-  }
-  setType(FunctionType::get(newInputTypes, oldType.getResults(), getContext()));
-  setAllArgAttrs(newArgAttrs);
-
-  // Update the entry block's arguments.
-  // We do this in reverse so that we erase later indices before earlier
-  // indices, to avoid shifting the later indices.
-  Block &entry = front();
-  for (int i = 0; i < originalNumArgs; i++)
-    if (shouldEraseArg(originalNumArgs - i - 1))
-      entry.eraseArgument(originalNumArgs - i - 1);
 }
 
 /// Clone the internal blocks from this function into dest and all attributes

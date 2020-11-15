@@ -18,7 +18,6 @@ add_llvm_component_library(LLVMipo
   GlobalOpt.cpp
   GlobalSplit.cpp
   HotColdSplitting.cpp
-  IPConstantPropagation.cpp
   IPO.cpp
   InferFunctionAttrs.cpp
   InlineSimple.cpp
@@ -45,4 +44,26 @@ add_llvm_component_library(LLVMipo
 
   DEPENDS
   intrinsics_gen
+  omp_gen
+
+  COMPONENT_NAME
+  IPO
+
+  LINK_COMPONENTS
+  AggressiveInstCombine
+  Analysis
+  BitReader
+  BitWriter
+  Core
+  FrontendOpenMP
+  InstCombine
+  IRReader
+  Linker
+  Object
+  ProfileData
+  Scalar
+  Support
+  TransformUtils
+  Vectorize
+  Instrumentation
   )

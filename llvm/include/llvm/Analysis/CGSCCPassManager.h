@@ -355,6 +355,8 @@ public:
   /// Runs the CGSCC pass across every SCC in the module.
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &AM);
 
+  static bool isRequired() { return true; }
+
 private:
   CGSCCPassT Pass;
 };
@@ -506,7 +508,7 @@ public:
         PassPA = Pass.run(F, FAM);
       }
 
-      PI.runAfterPass<Function>(Pass, F);
+      PI.runAfterPass<Function>(Pass, F, PassPA);
 
       // We know that the function pass couldn't have invalidated any other
       // function's analyses (that's the contract of a function pass), so
@@ -543,6 +545,8 @@ public:
     return PA;
   }
 
+  static bool isRequired() { return true; }
+
 private:
   FunctionPassT Pass;
 };
@@ -554,6 +558,10 @@ CGSCCToFunctionPassAdaptor<FunctionPassT>
 createCGSCCToFunctionPassAdaptor(FunctionPassT Pass) {
   return CGSCCToFunctionPassAdaptor<FunctionPassT>(std::move(Pass));
 }
+
+/// Checks -abort-on-max-devirt-iterations-reached to see if we should report an
+/// error.
+void maxDevirtIterationsReached();
 
 /// A helper that repeats an SCC pass each time an indirect call is refined to
 /// a direct call by that pass.
@@ -635,9 +643,9 @@ public:
       PreservedAnalyses PassPA = Pass.run(*C, AM, CG, UR);
 
       if (UR.InvalidatedSCCs.count(C))
-        PI.runAfterPassInvalidated<LazyCallGraph::SCC>(Pass);
+        PI.runAfterPassInvalidated<LazyCallGraph::SCC>(Pass, PassPA);
       else
-        PI.runAfterPass<LazyCallGraph::SCC>(Pass, *C);
+        PI.runAfterPass<LazyCallGraph::SCC>(Pass, *C, PassPA);
 
       // If the SCC structure has changed, bail immediately and let the outer
       // CGSCC layer handle any iteration to reflect the refined structure.
@@ -707,6 +715,7 @@ public:
 
       // Otherwise, if we've already hit our max, we're done.
       if (Iteration >= MaxIterations) {
+        maxDevirtIterationsReached();
         LLVM_DEBUG(
             dbgs() << "Found another devirtualization after hitting the max "
                       "number of repetitions ("
@@ -899,9 +908,9 @@ ModuleToPostOrderCGSCCPassAdaptor<CGSCCPassT>::run(Module &M,
           }
 
           if (UR.InvalidatedSCCs.count(C))
-            PI.runAfterPassInvalidated<LazyCallGraph::SCC>(Pass);
+            PI.runAfterPassInvalidated<LazyCallGraph::SCC>(Pass, PassPA);
           else
-            PI.runAfterPass<LazyCallGraph::SCC>(Pass, *C);
+            PI.runAfterPass<LazyCallGraph::SCC>(Pass, *C, PassPA);
 
           // Update the SCC and RefSCC if necessary.
           C = UR.UpdatedC ? UR.UpdatedC : C;

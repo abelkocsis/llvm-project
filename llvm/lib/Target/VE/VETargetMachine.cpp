@@ -23,7 +23,7 @@ using namespace llvm;
 
 #define DEBUG_TYPE "ve"
 
-extern "C" void LLVMInitializeVETarget() {
+extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeVETarget() {
   // Register the target.
   RegisterTargetMachine<VETargetMachine> X(getTheVETarget());
 }
@@ -41,8 +41,8 @@ static std::string computeDataLayout(const Triple &T) {
   // VE supports 32 bit and 64 bits integer on registers
   Ret += "-n32:64";
 
-  // Stack alignment is 64 bits
-  Ret += "-S64";
+  // Stack alignment is 128 bits
+  Ret += "-S128";
 
   return Ret;
 }
@@ -96,12 +96,19 @@ public:
     return getTM<VETargetMachine>();
   }
 
+  void addIRPasses() override;
   bool addInstSelector() override;
 };
 } // namespace
 
 TargetPassConfig *VETargetMachine::createPassConfig(PassManagerBase &PM) {
   return new VEPassConfig(*this, PM);
+}
+
+void VEPassConfig::addIRPasses() {
+  // VE requires atomic expand pass.
+  addPass(createAtomicExpandPass());
+  TargetPassConfig::addIRPasses();
 }
 
 bool VEPassConfig::addInstSelector() {

@@ -14,105 +14,26 @@
 using namespace mlir;
 using namespace mlir::edsc;
 
-static Optional<Value> emitStaticFor(ArrayRef<Value> lbs, ArrayRef<Value> ubs,
-                                     int64_t step) {
-  if (lbs.size() != 1 || ubs.size() != 1)
-    return Optional<Value>();
-
-  auto *lbDef = lbs.front().getDefiningOp();
-  auto *ubDef = ubs.front().getDefiningOp();
-  if (!lbDef || !ubDef)
-    return Optional<Value>();
-
-  auto lbConst = dyn_cast<ConstantIndexOp>(lbDef);
-  auto ubConst = dyn_cast<ConstantIndexOp>(ubDef);
-  if (!lbConst || !ubConst)
-    return Optional<Value>();
-  return ScopedContext::getBuilderRef()
-      .create<AffineForOp>(ScopedContext::getLocation(), lbConst.getValue(),
-                           ubConst.getValue(), step)
-      .getInductionVar();
-}
-
-LoopBuilder mlir::edsc::makeAffineLoopBuilder(Value *iv, ArrayRef<Value> lbs,
-                                              ArrayRef<Value> ubs,
-                                              int64_t step) {
-  mlir::edsc::LoopBuilder result;
-  if (auto staticForIv = emitStaticFor(lbs, ubs, step))
-    *iv = staticForIv.getValue();
-  else
-    *iv = ScopedContext::getBuilderRef()
-              .create<AffineForOp>(
-                  ScopedContext::getLocation(), lbs,
-                  ScopedContext::getBuilderRef().getMultiDimIdentityMap(
-                      lbs.size()),
-                  ubs,
-                  ScopedContext::getBuilderRef().getMultiDimIdentityMap(
-                      ubs.size()),
-                  step)
-              .getInductionVar();
-
-  auto *body = getForInductionVarOwner(*iv).getBody();
-  result.enter(body);
-  return result;
-}
-
-mlir::edsc::AffineLoopNestBuilder::AffineLoopNestBuilder(Value *iv,
-                                                         ArrayRef<Value> lbs,
-                                                         ArrayRef<Value> ubs,
-                                                         int64_t step) {
-  loops.emplace_back(makeAffineLoopBuilder(iv, lbs, ubs, step));
-}
-
 void mlir::edsc::affineLoopNestBuilder(
     ValueRange lbs, ValueRange ubs, ArrayRef<int64_t> steps,
     function_ref<void(ValueRange)> bodyBuilderFn) {
   assert(ScopedContext::getContext() && "EDSC ScopedContext not set up");
-  assert(lbs.size() == ubs.size() && "Mismatch in number of arguments");
-  assert(lbs.size() == steps.size() && "Mismatch in number of arguments");
 
-  // If there are no loops to be constructed, construct the body anyway.
-  if (lbs.empty()) {
-    if (bodyBuilderFn)
-      bodyBuilderFn(ValueRange());
-    return;
-  }
+  // Wrap the body builder function into an interface compatible with the main
+  // builder.
+  auto wrappedBuilderFn = [&](OpBuilder &nestedBuilder, Location nestedLoc,
+                              ValueRange ivs) {
+    ScopedContext context(nestedBuilder, nestedLoc);
+    bodyBuilderFn(ivs);
+  };
+  function_ref<void(OpBuilder &, Location, ValueRange)> wrapper;
+  if (bodyBuilderFn)
+    wrapper = wrappedBuilderFn;
 
-  // Fetch the builder and location.
+  // Extract the builder, location and construct the loop nest.
   OpBuilder &builder = ScopedContext::getBuilderRef();
-  OpBuilder::InsertionGuard guard(builder);
   Location loc = ScopedContext::getLocation();
-  AffineMap identity = builder.getDimIdentityMap();
-
-  // Create the loops iteratively and store the induction variables.
-  SmallVector<Value, 4> ivs;
-  ivs.reserve(lbs.size());
-  for (unsigned i = 0, e = lbs.size(); i < e; ++i) {
-    // Callback for creating the loop body, always creates the terminator.
-    auto loopBody = [&](OpBuilder &nestedBuilder, Location nestedLoc,
-                        Value iv) {
-      ivs.push_back(iv);
-      // In the innermost loop, call the body builder.
-      if (i == e - 1 && bodyBuilderFn) {
-        ScopedContext nestedContext(nestedBuilder, loc);
-        OpBuilder::InsertionGuard nestedGuard(nestedBuilder);
-        bodyBuilderFn(ivs);
-      }
-      nestedBuilder.create<AffineTerminatorOp>(nestedLoc);
-    };
-
-    // Create the loop. If the bounds are known to be constants, use the
-    // constant form of the loop.
-    auto lbConst = lbs[i].getDefiningOp<ConstantIndexOp>();
-    auto ubConst = ubs[i].getDefiningOp<ConstantIndexOp>();
-    auto loop = lbConst && ubConst
-                    ? builder.create<AffineForOp>(loc, lbConst.getValue(),
-                                                  ubConst.getValue(), steps[i],
-                                                  loopBody)
-                    : builder.create<AffineForOp>(loc, lbs[i], identity, ubs[i],
-                                                  identity, steps[i], loopBody);
-    builder.setInsertionPointToStart(loop.getBody());
-  }
+  buildAffineLoopNest(builder, loc, lbs, ubs, steps, wrapper);
 }
 
 void mlir::edsc::affineLoopBuilder(ValueRange lbs, ValueRange ubs, int64_t step,
@@ -126,39 +47,40 @@ void mlir::edsc::affineLoopBuilder(ValueRange lbs, ValueRange ubs, int64_t step,
   // updating the scoped context.
   builder.create<AffineForOp>(
       loc, lbs, builder.getMultiDimIdentityMap(lbs.size()), ubs,
-      builder.getMultiDimIdentityMap(ubs.size()), step,
-      [&](OpBuilder &nestedBuilder, Location nestedLoc, Value iv) {
+      builder.getMultiDimIdentityMap(ubs.size()), step, llvm::None,
+      [&](OpBuilder &nestedBuilder, Location nestedLoc, Value iv,
+          ValueRange itrArgs) {
         if (bodyBuilderFn) {
           ScopedContext nestedContext(nestedBuilder, nestedLoc);
           OpBuilder::InsertionGuard guard(nestedBuilder);
           bodyBuilderFn(iv);
         }
-        nestedBuilder.create<AffineTerminatorOp>(nestedLoc);
+        nestedBuilder.create<AffineYieldOp>(nestedLoc);
       });
 }
 
-mlir::edsc::AffineLoopNestBuilder::AffineLoopNestBuilder(
-    MutableArrayRef<Value> ivs, ArrayRef<Value> lbs, ArrayRef<Value> ubs,
-    ArrayRef<int64_t> steps) {
-  assert(ivs.size() == lbs.size() && "Mismatch in number of arguments");
-  assert(ivs.size() == ubs.size() && "Mismatch in number of arguments");
-  assert(ivs.size() == steps.size() && "Mismatch in number of arguments");
-  for (auto it : llvm::zip(ivs, lbs, ubs, steps))
-    loops.emplace_back(makeAffineLoopBuilder(&std::get<0>(it), std::get<1>(it),
-                                             std::get<2>(it), std::get<3>(it)));
-}
+void mlir::edsc::affineLoopBuilder(
+    ValueRange lbs, ValueRange ubs, int64_t step, ValueRange iterArgs,
+    function_ref<void(Value, ValueRange)> bodyBuilderFn) {
+  // Fetch the builder and location.
+  assert(ScopedContext::getContext() && "EDSC ScopedContext not set up");
+  OpBuilder &builder = ScopedContext::getBuilderRef();
+  Location loc = ScopedContext::getLocation();
 
-void mlir::edsc::AffineLoopNestBuilder::operator()(
-    function_ref<void(void)> fun) {
-  if (fun)
-    fun();
-  // Iterate on the calling operator() on all the loops in the nest.
-  // The iteration order is from innermost to outermost because enter/exit needs
-  // to be asymmetric (i.e. enter() occurs on LoopBuilder construction, exit()
-  // occurs on calling operator()). The asymmetry is required for properly
-  // nesting imperfectly nested regions (see LoopBuilder::operator()).
-  for (auto lit = loops.rbegin(), eit = loops.rend(); lit != eit; ++lit)
-    (*lit)();
+  // Create the actual loop and call the body builder, if provided, after
+  // updating the scoped context.
+  builder.create<AffineForOp>(
+      loc, lbs, builder.getMultiDimIdentityMap(lbs.size()), ubs,
+      builder.getMultiDimIdentityMap(ubs.size()), step, iterArgs,
+      [&](OpBuilder &nestedBuilder, Location nestedLoc, Value iv,
+          ValueRange itrArgs) {
+        if (bodyBuilderFn) {
+          ScopedContext nestedContext(nestedBuilder, nestedLoc);
+          OpBuilder::InsertionGuard guard(nestedBuilder);
+          bodyBuilderFn(iv, itrArgs);
+        } else if (itrArgs.empty())
+          nestedBuilder.create<AffineYieldOp>(nestedLoc);
+      });
 }
 
 static std::pair<AffineExpr, Value>
@@ -220,7 +142,7 @@ static Value createBinaryHandle(
     return ValueBuilder<IOp>(lhs, rhs);
   } else if (thisType.isa<FloatType>()) {
     return ValueBuilder<FOp>(lhs, rhs);
-  } else if (thisType.isa<VectorType>() || thisType.isa<TensorType>()) {
+  } else if (thisType.isa<VectorType, TensorType>()) {
     auto aggregateType = thisType.cast<ShapedType>();
     if (aggregateType.getElementType().isSignlessInteger())
       return ValueBuilder<IOp>(lhs, rhs);
@@ -324,29 +246,51 @@ Value mlir::edsc::op::ne(Value lhs, Value rhs) {
              ? createFComparisonExpr(CmpFPredicate::ONE, lhs, rhs)
              : createIComparisonExpr(CmpIPredicate::ne, lhs, rhs);
 }
-Value mlir::edsc::op::operator<(Value lhs, Value rhs) {
+Value mlir::edsc::op::slt(Value lhs, Value rhs) {
   auto type = lhs.getType();
   return type.isa<FloatType>()
              ? createFComparisonExpr(CmpFPredicate::OLT, lhs, rhs)
-             :
-             // TODO(ntv,zinenko): signed by default, how about unsigned?
-             createIComparisonExpr(CmpIPredicate::slt, lhs, rhs);
+             : createIComparisonExpr(CmpIPredicate::slt, lhs, rhs);
 }
-Value mlir::edsc::op::operator<=(Value lhs, Value rhs) {
+Value mlir::edsc::op::sle(Value lhs, Value rhs) {
   auto type = lhs.getType();
   return type.isa<FloatType>()
              ? createFComparisonExpr(CmpFPredicate::OLE, lhs, rhs)
              : createIComparisonExpr(CmpIPredicate::sle, lhs, rhs);
 }
-Value mlir::edsc::op::operator>(Value lhs, Value rhs) {
+Value mlir::edsc::op::sgt(Value lhs, Value rhs) {
   auto type = lhs.getType();
   return type.isa<FloatType>()
              ? createFComparisonExpr(CmpFPredicate::OGT, lhs, rhs)
              : createIComparisonExpr(CmpIPredicate::sgt, lhs, rhs);
 }
-Value mlir::edsc::op::operator>=(Value lhs, Value rhs) {
+Value mlir::edsc::op::sge(Value lhs, Value rhs) {
   auto type = lhs.getType();
   return type.isa<FloatType>()
              ? createFComparisonExpr(CmpFPredicate::OGE, lhs, rhs)
              : createIComparisonExpr(CmpIPredicate::sge, lhs, rhs);
+}
+Value mlir::edsc::op::ult(Value lhs, Value rhs) {
+  auto type = lhs.getType();
+  return type.isa<FloatType>()
+             ? createFComparisonExpr(CmpFPredicate::OLT, lhs, rhs)
+             : createIComparisonExpr(CmpIPredicate::ult, lhs, rhs);
+}
+Value mlir::edsc::op::ule(Value lhs, Value rhs) {
+  auto type = lhs.getType();
+  return type.isa<FloatType>()
+             ? createFComparisonExpr(CmpFPredicate::OLE, lhs, rhs)
+             : createIComparisonExpr(CmpIPredicate::ule, lhs, rhs);
+}
+Value mlir::edsc::op::ugt(Value lhs, Value rhs) {
+  auto type = lhs.getType();
+  return type.isa<FloatType>()
+             ? createFComparisonExpr(CmpFPredicate::OGT, lhs, rhs)
+             : createIComparisonExpr(CmpIPredicate::ugt, lhs, rhs);
+}
+Value mlir::edsc::op::uge(Value lhs, Value rhs) {
+  auto type = lhs.getType();
+  return type.isa<FloatType>()
+             ? createFComparisonExpr(CmpFPredicate::OGE, lhs, rhs)
+             : createIComparisonExpr(CmpIPredicate::uge, lhs, rhs);
 }

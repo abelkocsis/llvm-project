@@ -33,8 +33,10 @@ set_source_files_properties("${version_inc}"
   PROPERTIES GENERATED TRUE
              HEADER_FILE_ONLY TRUE)
 
-set_property(SOURCE Version.cpp APPEND PROPERTY
-             COMPILE_DEFINITIONS "HAVE_VCS_VERSION_INC")
+if(CLANG_VENDOR)
+  set_source_files_properties(Version.cpp
+    PROPERTIES COMPILE_DEFINITIONS "CLANG_VENDOR=\"${CLANG_VENDOR} \"")
+endif()
 
 add_clang_library(clangBasic
   Attributes.cpp
@@ -46,9 +48,9 @@ add_clang_library(clangBasic
   DiagnosticIDs.cpp
   DiagnosticOptions.cpp
   ExpressionTraits.cpp
+  FileEntry.cpp
   FileManager.cpp
   FileSystemStatCache.cpp
-  FixedPoint.cpp
   IdentifierTable.cpp
   LangOptions.cpp
   LangStandards.cpp
@@ -62,6 +64,7 @@ add_clang_library(clangBasic
   SourceLocation.cpp
   SourceManager.cpp
   Stack.cpp
+  TargetID.cpp
   TargetInfo.cpp
   Targets.cpp
   Targets/AArch64.cpp
@@ -84,6 +87,7 @@ add_clang_library(clangBasic
   Targets/Sparc.cpp
   Targets/SystemZ.cpp
   Targets/TCE.cpp
+  Targets/VE.cpp
   Targets/WebAssembly.cpp
   Targets/X86.cpp
   Targets/XCore.cpp
@@ -94,5 +98,8 @@ add_clang_library(clangBasic
   XRayInstr.cpp
   XRayLists.cpp
   ${version_inc}
+
+  DEPENDS
+  omp_gen
   )
 

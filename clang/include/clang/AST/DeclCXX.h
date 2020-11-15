@@ -1008,8 +1008,13 @@ public:
 
   /// Retrieve the lambda static invoker, the address of which
   /// is returned by the conversion operator, and the body of which
-  /// is forwarded to the lambda call operator.
+  /// is forwarded to the lambda call operator. The version that does not
+  /// take a calling convention uses the 'default' calling convention for free
+  /// functions if the Lambda's calling convention was not modified via
+  /// attribute. Otherwise, it will return the calling convention specified for
+  /// the lambda.
   CXXMethodDecl *getLambdaStaticInvoker() const;
+  CXXMethodDecl *getLambdaStaticInvoker(CallingConv CC) const;
 
   /// Retrieve the generic lambda's template parameter list.
   /// Returns null if the class does not represent a lambda or a generic
@@ -1025,7 +1030,7 @@ public:
   }
 
   /// Set the captures for this lambda closure type.
-  void setCaptures(ArrayRef<LambdaCapture> Captures);
+  void setCaptures(ASTContext &Context, ArrayRef<LambdaCapture> Captures);
 
   /// For a closure type, retrieve the mapping from captured
   /// variables and \c this to the non-static data members that store the
@@ -1394,6 +1399,11 @@ public:
            (isAggregate() || isLambda() ||
             hasConstexprNonCopyMoveConstructor() ||
             hasTrivialDefaultConstructor());
+  }
+
+  /// Determine whether this is a structural type.
+  bool isStructural() const {
+    return isLiteral() && data().StructuralIfLiteral;
   }
 
   /// If this record is an instantiation of a member class,
@@ -4070,11 +4080,8 @@ public:
 
 /// Insertion operator for diagnostics.  This allows sending an AccessSpecifier
 /// into a diagnostic with <<.
-const DiagnosticBuilder &operator<<(const DiagnosticBuilder &DB,
-                                    AccessSpecifier AS);
-
-const PartialDiagnostic &operator<<(const PartialDiagnostic &DB,
-                                    AccessSpecifier AS);
+const StreamingDiagnostic &operator<<(const StreamingDiagnostic &DB,
+                                      AccessSpecifier AS);
 
 } // namespace clang
 

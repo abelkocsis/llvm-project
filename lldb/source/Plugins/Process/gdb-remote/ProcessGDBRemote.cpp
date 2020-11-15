@@ -17,6 +17,9 @@
 #include <unistd.h>
 #endif
 #include <sys/stat.h>
+#if defined(__APPLE__)
+#include <sys/sysctl.h>
+#endif
 #include <sys/types.h>
 #include <time.h>
 
@@ -184,21 +187,6 @@ static const ProcessKDPPropertiesSP &GetGlobalPluginProperties() {
 #else
 #define LOW_PORT (1024u)
 #define HIGH_PORT (49151u)
-#endif
-
-#if defined(__APPLE__) &&                                                      \
-    (defined(__arm__) || defined(__arm64__) || defined(__aarch64__))
-static bool rand_initialized = false;
-
-static inline uint16_t get_random_port() {
-  if (!rand_initialized) {
-    time_t seed = time(NULL);
-
-    rand_initialized = true;
-    srand(seed);
-  }
-  return (rand() % (HIGH_PORT - LOW_PORT)) + LOW_PORT;
-}
 #endif
 
 ConstString ProcessGDBRemote::GetPluginNameStatic() {
@@ -641,8 +629,7 @@ Status ProcessGDBRemote::WillAttachToProcessWithName(const char *process_name,
   return WillLaunchOrAttach();
 }
 
-Status ProcessGDBRemote::DoConnectRemote(Stream *strm,
-                                         llvm::StringRef remote_url) {
+Status ProcessGDBRemote::DoConnectRemote(llvm::StringRef remote_url) {
   Log *log(ProcessGDBRemoteLog::GetLogIfAllCategoriesSet(GDBR_LOG_PROCESS));
   Status error(WillLaunchOrAttach());
 
@@ -830,8 +817,8 @@ Status ProcessGDBRemote::DoLaunch(lldb_private::Module *exe_module,
         // since 'O' packets can really slow down debugging if the inferior
         // does a lot of output.
         if ((!stdin_file_spec || !stdout_file_spec || !stderr_file_spec) &&
-            pty.OpenFirstAvailablePrimary(O_RDWR | O_NOCTTY, nullptr, 0)) {
-          FileSpec secondary_name{pty.GetSecondaryName(nullptr, 0)};
+            !errorToBool(pty.OpenFirstAvailablePrimary(O_RDWR | O_NOCTTY))) {
+          FileSpec secondary_name(pty.GetSecondaryName());
 
           if (!stdin_file_spec)
             stdin_file_spec = secondary_name;
@@ -1235,6 +1222,10 @@ Status ProcessGDBRemote::GetMetaData(lldb::user_id_t uid, lldb::tid_t thread_id,
 Status ProcessGDBRemote::GetTraceConfig(lldb::user_id_t uid,
                                         TraceOptions &options) {
   return m_gdb_comm.SendGetTraceConfigPacket(uid, options);
+}
+
+llvm::Expected<TraceTypeInfo> ProcessGDBRemote::GetSupportedTraceType() {
+  return m_gdb_comm.SendGetSupportedTraceType();
 }
 
 void ProcessGDBRemote::DidExit() {
@@ -2660,7 +2651,7 @@ addr_t ProcessGDBRemote::GetImageInfoAddress() {
     llvm::Expected<LoadedModuleInfoList> list = GetLoadedModuleList();
     if (!list) {
       Log *log(ProcessGDBRemoteLog::GetLogIfAllCategoriesSet(GDBR_LOG_PROCESS));
-      LLDB_LOG_ERROR(log, list.takeError(), "Failed to read module list: {0}");
+      LLDB_LOG_ERROR(log, list.takeError(), "Failed to read module list: {0}.");
     } else {
       addr = list->m_link_map;
     }
@@ -3217,14 +3208,8 @@ Status ProcessGDBRemote::DisableBreakpointSite(BreakpointSite *bp_site) {
       break;
 
     case BreakpointSite::eExternal: {
-      GDBStoppointType stoppoint_type;
-      if (bp_site->IsHardware())
-        stoppoint_type = eBreakpointHardware;
-      else
-        stoppoint_type = eBreakpointSoftware;
-
-      if (m_gdb_comm.SendGDBStoppointTypePacket(stoppoint_type, false, addr,
-                                                bp_op_size))
+      if (m_gdb_comm.SendGDBStoppointTypePacket(eBreakpointSoftware, false,
+                                                addr, bp_op_size))
         error.SetErrorToGenericError();
     } break;
     }
@@ -3431,6 +3416,23 @@ Status ProcessGDBRemote::LaunchAndConnectToDebugserver(
     debugserver_launch_info.SetMonitorProcessCallback(
         std::bind(MonitorDebugserverProcess, this_wp, _1, _2, _3, _4), false);
     debugserver_launch_info.SetUserID(process_info.GetUserID());
+
+#if defined(__APPLE__)
+    // On macOS 11, we need to support x86_64 applications translated to
+    // arm64. We check whether a binary is translated and spawn the correct
+    // debugserver accordingly.
+    int mib[] = { CTL_KERN, KERN_PROC, KERN_PROC_PID,
+                  static_cast<int>(process_info.GetProcessID()) };
+    struct kinfo_proc processInfo;
+    size_t bufsize = sizeof(processInfo);
+    if (sysctl(mib, (unsigned)(sizeof(mib)/sizeof(int)), &processInfo,
+               &bufsize, NULL, 0) == 0 && bufsize > 0) {
+      if (processInfo.kp_proc.p_flag & P_TRANSLATED) {
+        FileSpec rosetta_debugserver("/Library/Apple/usr/libexec/oah/debugserver");
+        debugserver_launch_info.SetExecutableFile(rosetta_debugserver, false);
+      }
+    }
+#endif
 
     int communication_fd = -1;
 #ifdef USE_SOCKETPAIR_FOR_LOCAL_CONNECTION

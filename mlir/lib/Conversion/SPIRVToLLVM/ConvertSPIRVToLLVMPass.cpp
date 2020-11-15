@@ -33,19 +33,26 @@ void ConvertSPIRVToLLVMPass::runOnOperation() {
   ModuleOp module = getOperation();
   LLVMTypeConverter converter(&getContext());
 
-  OwningRewritePatternList patterns;
-  populateSPIRVToLLVMConversionPatterns(context, converter, patterns);
+  // Encode global variable's descriptor set and binding if they exist.
+  encodeBindAttribute(module);
 
-  // Currently pulls in Std to LLVM conversion patterns
-  // that help with testing. This allows to convert
-  // function arguments to LLVM.
-  populateStdToLLVMConversionPatterns(converter, patterns);
+  OwningRewritePatternList patterns;
+
+  populateSPIRVToLLVMTypeConversion(converter);
+
+  populateSPIRVToLLVMModuleConversionPatterns(context, converter, patterns);
+  populateSPIRVToLLVMConversionPatterns(context, converter, patterns);
+  populateSPIRVToLLVMFunctionConversionPatterns(context, converter, patterns);
 
   ConversionTarget target(getContext());
   target.addIllegalDialect<spirv::SPIRVDialect>();
   target.addLegalDialect<LLVM::LLVMDialect>();
 
-  if (failed(applyPartialConversion(module, target, patterns, &converter)))
+  // Set `ModuleOp` and `ModuleTerminatorOp` as legal for `spv.module`
+  // conversion.
+  target.addLegalOp<ModuleOp>();
+  target.addLegalOp<ModuleTerminatorOp>();
+  if (failed(applyPartialConversion(module, target, std::move(patterns))))
     signalPassFailure();
 }
 

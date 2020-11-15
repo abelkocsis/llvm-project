@@ -46,6 +46,18 @@ Expr<Type<TypeCategory::Logical, KIND>> FoldIntrinsicFunction(
         return Expr<T>{result};
       }
     }
+  } else if (name == "associated") {
+    bool gotConstant{true};
+    const Expr<SomeType> *firstArgExpr{args[0]->UnwrapExpr()};
+    if (!firstArgExpr || !IsNullPointer(*firstArgExpr)) {
+      gotConstant = false;
+    } else if (args[1]) { // There's a second argument
+      const Expr<SomeType> *secondArgExpr{args[1]->UnwrapExpr()};
+      if (!secondArgExpr || !IsNullPointer(*secondArgExpr)) {
+        gotConstant = false;
+      }
+    }
+    return gotConstant ? Expr<T>{false} : Expr<T>{std::move(funcRef)};
   } else if (name == "bge" || name == "bgt" || name == "ble" || name == "blt") {
     using LargestInt = Type<TypeCategory::Integer, 16>;
     static_assert(std::is_same_v<Scalar<LargestInt>, BOZLiteralConstant>);
@@ -77,6 +89,15 @@ Expr<Type<TypeCategory::Logical, KIND>> FoldIntrinsicFunction(
             [&fptr](const Scalar<LargestInt> &i, const Scalar<LargestInt> &j) {
               return Scalar<T>{std::invoke(fptr, i, j)};
             }));
+  } else if (name == "isnan") {
+    // A warning about an invalid argument is discarded from converting
+    // the argument of isnan().
+    auto restorer{context.messages().DiscardMessages()};
+    using DefaultReal = Type<TypeCategory::Real, 4>;
+    return FoldElementalIntrinsic<T, DefaultReal>(context, std::move(funcRef),
+        ScalarFunc<T, DefaultReal>([](const Scalar<DefaultReal> &x) {
+          return Scalar<T>{x.IsNotANumber()};
+        }));
   } else if (name == "is_contiguous") {
     if (args.at(0)) {
       if (auto *expr{args[0]->UnwrapExpr()}) {

@@ -624,6 +624,7 @@ lltok::Kind LLLexer::LexIdentifier() {
   KEYWORD(amdgpu_ps);
   KEYWORD(amdgpu_cs);
   KEYWORD(amdgpu_kernel);
+  KEYWORD(amdgpu_gfx);
   KEYWORD(tailcc);
 
   KEYWORD(cc);
@@ -664,6 +665,7 @@ lltok::Kind LLLexer::LexIdentifier() {
   KEYWORD(noreturn);
   KEYWORD(nosync);
   KEYWORD(nocf_check);
+  KEYWORD(noundef);
   KEYWORD(nounwind);
   KEYWORD(null_pointer_is_valid);
   KEYWORD(optforfuzzing);
@@ -677,6 +679,7 @@ lltok::Kind LLLexer::LexIdentifier() {
   KEYWORD(signext);
   KEYWORD(speculatable);
   KEYWORD(sret);
+  KEYWORD(nossp);
   KEYWORD(ssp);
   KEYWORD(sspreq);
   KEYWORD(sspstrong);
@@ -696,6 +699,8 @@ lltok::Kind LLLexer::LexIdentifier() {
   KEYWORD(writeonly);
   KEYWORD(zeroext);
   KEYWORD(immarg);
+  KEYWORD(byref);
+  KEYWORD(mustprogress);
 
   KEYWORD(type);
   KEYWORD(opaque);

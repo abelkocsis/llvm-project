@@ -29,10 +29,13 @@ add_clang_library(clangTidyBugproneModule
   MisplacedWideningCastCheck.cpp
   MoveForwardingReferenceCheck.cpp
   MultipleStatementMacroCheck.cpp
+  NoEscapeCheck.cpp
   NotNullTerminatedResultCheck.cpp
   ParentVirtualCallCheck.cpp
   PosixReturnCheck.cpp
+  RedundantBranchConditionCheck.cpp
   ReservedIdentifierCheck.cpp
+  SignalHandlerCheck.cpp
   SignalInMultithreadedProgramCheck.cpp
   SignedCharMisuseCheck.cpp
   SizeofContainerCheck.cpp
@@ -63,6 +66,9 @@ add_clang_library(clangTidyBugproneModule
   clangTidy
   clangTidyCppCoreGuidelinesModule
   clangTidyUtils
+
+  DEPENDS
+  omp_gen
   )
 
 clang_target_link_libraries(clangTidyBugproneModule

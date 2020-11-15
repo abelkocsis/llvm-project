@@ -70,6 +70,7 @@ pythonize_bool(LIBCXX_HAS_ATOMIC_LIB)
 pythonize_bool(LIBCXX_HAVE_CXX_ATOMICS_WITH_LIB)
 pythonize_bool(LIBCXX_BUILD_EXTERNAL_THREAD_LIBRARY)
 pythonize_bool(LIBCXX_DEBUG_BUILD)
+pythonize_bool(LIBCXX_ENABLE_DEBUG_MODE_SUPPORT)
 pythonize_bool(LIBCXX_ENABLE_PARALLEL_ALGORITHMS)
 
 # By default, for non-standalone builds, libcxx and libcxxabi share a library
@@ -103,20 +104,22 @@ if(LIBCXX_TEST_GDB_PRETTY_PRINTERS)
 endif()
 
 if (LIBCXX_INCLUDE_TESTS)
-  include(AddLLVM) # for configure_lit_site_cfg and add_lit_testsuit
+  include(AddLLVM) # for configure_lit_site_cfg and add_lit_target
 
   configure_lit_site_cfg(
-    ${CMAKE_CURRENT_SOURCE_DIR}/lit.site.cfg.in
-    ${CMAKE_CURRENT_BINARY_DIR}/lit.site.cfg)
+    "${LIBCXX_TEST_CONFIG}"
+    ${CMAKE_CURRENT_BINARY_DIR}/lit.site.cfg
+    MAIN_CONFIG "${CMAKE_CURRENT_SOURCE_DIR}/lit.cfg.py")
 
   add_custom_target(check-cxx-deps
     DEPENDS cxx ${LIBCXX_TEST_DEPS}
     COMMENT "Builds dependencies required to run the test suite.")
 
-  add_lit_testsuite(check-cxx
+  add_lit_target(check-cxx
     "Running libcxx tests"
     ${CMAKE_CURRENT_BINARY_DIR}
-    DEPENDS check-cxx-deps)
+    DEPENDS check-cxx-deps
+    PARAMS "${LIBCXX_TEST_PARAMS}")
 endif()
 
 if (LIBCXX_GENERATE_COVERAGE)
