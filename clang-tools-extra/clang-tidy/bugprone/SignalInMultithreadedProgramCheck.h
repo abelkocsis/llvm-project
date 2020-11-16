@@ -31,7 +31,9 @@ public:
   SignalInMultithreadedProgramCheck(StringRef Name, ClangTidyContext *Context)
       : ClangTidyCheck(Name, Context),
         ThreadList(Options.get(
-            "ThreadList", "thrd_create;::std::thread;::boost::thread;pthread_t")) {}
+            "ThreadList",
+            "thrd_create;::std::thread;::boost::thread;pthread_t;CreateThread;"
+            "CreateRemoteThread;_beginthread;_beginthreadex")) {}
   void storeOptions(ClangTidyOptions::OptionMap &Opts) override;
   void registerMatchers(ast_matchers::MatchFinder *Finder) override;
   void check(const ast_matchers::MatchFinder::MatchResult &Result) override;

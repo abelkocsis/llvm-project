@@ -12,6 +12,7 @@
 #include "clang/AST/ASTContext.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
 #include "clang/Basic/TargetInfo.h"
+#include "clang/Lex/Preprocessor.h"
 
 using namespace clang::ast_matchers;
 using namespace clang::ast_matchers::internal;
@@ -35,12 +36,12 @@ void SignalInMultithreadedProgramCheck::storeOptions(
 
 void SignalInMultithreadedProgramCheck::registerMatchers(MatchFinder *Finder) {
 
-  auto threadCall =
-      anyOf(hasDescendant(callExpr(ignoringImpCasts(hasDescendant(declRefExpr(
-                hasDeclaration(functionDecl(hasAnyListedName(ThreadList)))))))),
-            hasDescendant(varDecl(hasType(recordDecl(hasName("::std::thread")))))
+  auto threadCall = anyOf(
+      hasDescendant(callExpr(ignoringImpCasts(hasDescendant(declRefExpr(
+          hasDeclaration(functionDecl(hasAnyListedName(ThreadList)))))))),
+      hasDescendant(varDecl(hasType(recordDecl(hasName("::std::thread")))))
 
-      );
+  );
   Finder->addMatcher(
       callExpr(
           ignoringImpCasts(hasDescendant(declRefExpr(hasDeclaration(

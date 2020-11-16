@@ -124,7 +124,9 @@ New checks
   Finds ``signal`` function calls when the program is multithreaded. The
   check considers the analyzed program multithreaded if it finds at least
   one function call of the following: ``thrd_create``, ``std::thread``, 
-  ``boost::thread``, ``pthread_t``.
+  ``boost::thread``, ``pthread_t``, ``CreateThread``, ``CreateRemoteThread``,
+  ``_beginthread``, ``_beginthreadex`` or a user-defined function added as a
+  parameter.
 
 - New :doc:`bugprone-suspicious-include
   <clang-tidy/checks/bugprone-suspicious-include>` check.
