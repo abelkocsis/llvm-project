@@ -35,7 +35,7 @@ void DoNotReferAtomicTwiceCheck::check(const MatchFinder::MatchResult &Result) {
   if (!MatchedRef || !MatchedVar)
     return;
   diag(MatchedRef->getExprLoc(),
-       "Do not refer to '%0' atomic variable twice in an expression")
+       "Do not refer to atomic variable '%0' twice in an expression")
       << MatchedVar->getName();
 }
 

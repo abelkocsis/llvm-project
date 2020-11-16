@@ -79,7 +79,7 @@ New checks
 - New :doc:`bugprone-do-not-refer-atomic-twice
   <clang-tidy/checks/bugprone-do-not-refer-atomic-twice>` check.
 
-  Finds atomic variable which is referred twice in an expression.
+  Finds atomic variables which are referred twice in an expression.
 
 - New :doc:`cppcoreguidelines-avoid-non-const-global-variables
   <clang-tidy/checks/cppcoreguidelines-avoid-non-const-global-variables>` check.
