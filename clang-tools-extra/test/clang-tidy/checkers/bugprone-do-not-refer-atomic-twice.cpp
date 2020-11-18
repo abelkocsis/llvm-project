@@ -2,25 +2,34 @@
 #define _Bool bool
 typedef _Atomic _Bool atomic_bool;
 typedef _Atomic int atomic_int;
-#define ATOMIC_VAR_INIT(VALUE) (VALUE)
+#define offsetof(type, member) 0
 
 namespace std {
-  template<class T> struct atomic{
-    atomic(T t){}
-    int operator+(T t){ return 0;}
-    int operator*(T t){ return 0;}
-    int operator=(T t){ return 0;}
-    void operator+=(T t){}
-    int operator++(T t){ return 0;}
-    operator T() const { return 0; }
-  };
-}
+template <class T>
+struct atomic {
+  atomic(T t) {}
+  T operator=(const T t) { return t; }
+  T operator+(const T t) { return t; }
+  T operator*(const T t) { return t; }
+  void operator+=(const T t) {}
+  T operator++(const T t) { return t; }
+  operator T() const { return 0; }
+};
+} // namespace std
 
-atomic_bool b = ATOMIC_VAR_INIT(false);
-atomic_int n = ATOMIC_VAR_INIT(0);
-_Atomic int n2 = ATOMIC_VAR_INIT(0);
-_Atomic(int) n3 = ATOMIC_VAR_INIT(0);
+atomic_bool b = false;
+atomic_int n = 0;
+_Atomic int n2 = 0;
+_Atomic(int) n3 = 0;
 std::atomic<int> n4(0);
+
+struct S {
+  atomic_bool b;
+  atomic_int n;
+  _Atomic int n2;
+  _Atomic(int) n3;
+  std::atomic<int> n4();
+};
 
 void warn1() {
   n = (n + 1) / 2;
@@ -101,4 +110,20 @@ void good4() {
   n2++;
   n3++;
   n4++;
+}
+
+void good5() {
+  int a = sizeof(atomic_int);
+  int a2 = sizeof(_Atomic int);
+  int a3 = sizeof(_Atomic(int));
+  int a4 = sizeof(std::atomic<int>);
+  int a5 = sizeof(atomic_bool);
+}
+
+void good6() {
+  int a = offsetof(S, b);
+  int a2 = offsetof(S, n);
+  int a3 = offsetof(S, n2);
+  int a4 = offsetof(S, n3);
+  int a5 = offsetof(S, n4);
 }

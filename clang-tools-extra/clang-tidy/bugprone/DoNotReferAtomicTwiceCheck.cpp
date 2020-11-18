@@ -16,16 +16,34 @@ namespace clang {
 namespace tidy {
 namespace bugprone {
 
+const auto BinOp = anyOf(
+    hasAncestor(cxxOperatorCallExpr(allOf(
+        anyOf(hasOverloadedOperatorName("+"), hasOverloadedOperatorName("-"),
+              hasOverloadedOperatorName("*"), hasOverloadedOperatorName("/"),
+              hasOverloadedOperatorName("%"), hasOverloadedOperatorName("="),
+              hasOverloadedOperatorName("&&"), hasOverloadedOperatorName("||"),
+              hasOverloadedOperatorName("&"), hasOverloadedOperatorName("|"),
+              hasOverloadedOperatorName("^")),
+        unless(hasDescendant(atomicExpr())),
+        hasArgument(
+            1, hasDescendant(declRefExpr(to(varDecl(equalsBoundNode("atomic"))))
+                                 .bind("rhs")))
+
+            ))),
+    hasAncestor(binaryOperator(
+        unless(hasDescendant(atomicExpr())),
+        hasRHS(hasDescendant(declRefExpr(to(varDecl(equalsBoundNode("atomic"))))
+                                 .bind("rhs"))))));
+
 void DoNotReferAtomicTwiceCheck::registerMatchers(MatchFinder *Finder) {
   Finder->addMatcher(
-      declRefExpr(hasType(hasUnqualifiedDesugaredType(atomicType())),
-                  to(varDecl().bind("atomic")),
-                  hasAncestor(binaryOperator(
-                      unless(hasDescendant(atomicExpr())),
-                      hasRHS(hasDescendant(
-                          declRefExpr(to(varDecl(equalsBoundNode("atomic"))))
-                              .bind("rhs"))))),
-                  unless(equalsBoundNode("rhs"))),
+      declRefExpr(
+
+          anyOf(hasType(hasUnqualifiedDesugaredType(atomicType())),
+                hasType(recordDecl(hasName("::std::atomic")))),
+          to(varDecl().bind("atomic")),
+
+          BinOp, unless(equalsBoundNode("rhs"))),
       this);
 }
 
