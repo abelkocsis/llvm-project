@@ -76,7 +76,7 @@ void DWARFDebugInfo::ParseUnitsFor(DIERef::Section section) {
   if (m_context.isDwo())
     index = &llvm::getDWARFUnitIndex(m_context.GetAsLLVM(),
                                      section == DIERef::Section::DebugTypes
-                                         ? llvm::DW_SECT_TYPES
+                                         ? llvm::DW_SECT_EXT_TYPES
                                          : llvm::DW_SECT_INFO);
   lldb::offset_t offset = 0;
   while (data.ValidOffset(offset)) {
@@ -199,4 +199,3 @@ DWARFDebugInfo::GetDIE(const DIERef &die_ref) {
     return cu->GetNonSkeletonUnit().GetDIE(die_ref.die_offset());
   return DWARFDIE(); // Not found
 }
-

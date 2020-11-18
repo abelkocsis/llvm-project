@@ -54,10 +54,10 @@ public:
   enum VectorLibrary {
     NoLibrary,  // Don't use any vector library.
     Accelerate, // Use the Accelerate framework.
+    LIBMVEC,    // GLIBC vector math library.
     MASSV,      // IBM MASS vector library.
     SVML        // Intel short vector math library.
   };
-
 
   enum ObjCDispatchMethodKind {
     Legacy = 0,
@@ -109,6 +109,22 @@ public:
     Embed_Bitcode,  // Embed just the bitcode in the output.
     Embed_Marker    // Embed a marker as a placeholder for bitcode.
   };
+
+  // This field stores one of the allowed values for the option
+  // -fbasic-block-sections=.  The allowed values with this option are:
+  // {"labels", "all", "list=<file>", "none"}.
+  //
+  // "labels":      Only generate basic block symbols (labels) for all basic
+  //                blocks, do not generate unique sections for basic blocks.
+  //                Use the machine basic block id in the symbol name to
+  //                associate profile info from virtual address to machine
+  //                basic block.
+  // "all" :        Generate basic block sections for all basic blocks.
+  // "list=<file>": Generate basic block sections for a subset of basic blocks.
+  //                The functions and the machine basic block ids are specified
+  //                in the file.
+  // "none":        Disable sections/labels for basic blocks.
+  std::string BBSections;
 
   enum class FramePointerKind {
     None,        // Omit all frame pointers.
@@ -215,6 +231,9 @@ public:
   /// Name of the profile file to use with -fprofile-sample-use.
   std::string SampleProfileFile;
 
+  /// Name of the profile file to use as output for with -fmemory-profile.
+  std::string MemoryProfileOutput;
+
   /// Name of the profile file to use as input for -fprofile-instr-use
   std::string ProfileInstrumentUsePath;
 
@@ -306,6 +325,30 @@ public:
   /// List of dynamic shared object files to be loaded as pass plugins.
   std::vector<std::string> PassPlugins;
 
+  /// Path to allowlist file specifying which objects
+  /// (files, functions) should exclusively be instrumented
+  /// by sanitizer coverage pass.
+  std::vector<std::string> SanitizeCoverageAllowlistFiles;
+
+  /// The guard style used for stack protector to get a initial value, this
+  /// value usually be gotten from TLS or get from __stack_chk_guard, or some
+  /// other styles we may implement in the future.
+  std::string StackProtectorGuard;
+
+  /// The TLS base register when StackProtectorGuard is "tls".
+  /// On x86 this can be "fs" or "gs".
+  std::string StackProtectorGuardReg;
+
+  /// Path to blocklist file specifying which objects
+  /// (files, functions) listed for instrumentation by sanitizer
+  /// coverage pass should actually not be instrumented.
+  std::vector<std::string> SanitizeCoverageBlocklistFiles;
+
+  /// Executable and command-line used to create a given CompilerInvocation.
+  /// Most of the time this will be the full -cc1 command.
+  const char *Argv0 = nullptr;
+  ArrayRef<const char *> CommandLineArgs;
+
 public:
   // Define accessors/mutators for code generation options of enumeration type.
 #define CODEGENOPT(Name, Bits, Default)
@@ -356,6 +399,11 @@ public:
   /// Check if type and variable info should be emitted.
   bool hasReducedDebugInfo() const {
     return getDebugInfo() >= codegenoptions::DebugInfoConstructor;
+  }
+
+  /// Check if maybe unused type info should be emitted.
+  bool hasMaybeUnusedDebugInfo() const {
+    return getDebugInfo() >= codegenoptions::UnusedTypeInfo;
   }
 };
 

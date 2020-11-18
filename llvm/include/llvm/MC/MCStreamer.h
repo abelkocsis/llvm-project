@@ -13,6 +13,7 @@
 #ifndef LLVM_MC_MCSTREAMER_H
 #define LLVM_MC_MCSTREAMER_H
 
+#include "llvm/ADT/APInt.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/Optional.h"
@@ -40,7 +41,6 @@ class AssemblerConstantPools;
 class formatted_raw_ostream;
 class MCAsmBackend;
 class MCCodeEmitter;
-struct MCCodePaddingContext;
 class MCContext;
 struct MCDwarfFrameInfo;
 class MCExpr;
@@ -215,6 +215,10 @@ class MCStreamer {
   /// PushSection.
   SmallVector<std::pair<MCSectionSubPair, MCSectionSubPair>, 4> SectionStack;
 
+  /// Pointer to the parser's SMLoc if available. This is used to provide
+  /// locations for diagnostics.
+  const SMLoc *StartTokLocPtr = nullptr;
+
   /// The next unique ID to use when creating a WinCFI-related section (.pdata
   /// or .xdata). This ID ensures that we have a one-to-one mapping from
   /// code section to unwind info section, which MSVC's incremental linker
@@ -257,6 +261,11 @@ public:
 
   void setTargetStreamer(MCTargetStreamer *TS) {
     TargetStreamer.reset(TS);
+  }
+
+  void setStartTokLocPtr(const SMLoc *Loc) { StartTokLocPtr = Loc; }
+  SMLoc getStartTokLoc() const {
+    return StartTokLocPtr ? *StartTokLocPtr : SMLoc();
   }
 
   /// State management
@@ -378,7 +387,7 @@ public:
   ///
   /// This is called by PopSection and SwitchSection, if the current
   /// section changes.
-  virtual void ChangeSection(MCSection *, const MCExpr *);
+  virtual void changeSection(MCSection *, const MCExpr *);
 
   /// Save the current and previous section on the section stack.
   void PushSection() {
@@ -387,7 +396,7 @@ public:
   }
 
   /// Restore the current and previous section from the section stack.
-  /// Calls ChangeSection as needed.
+  /// Calls changeSection as needed.
   ///
   /// Returns false if the stack was empty.
   bool PopSection() {
@@ -400,7 +409,7 @@ public:
     MCSectionSubPair NewSection = I->first;
 
     if (NewSection.first && OldSection != NewSection)
-      ChangeSection(NewSection.first, NewSection.second);
+      changeSection(NewSection.first, NewSection.second);
     SectionStack.pop_back();
     return true;
   }
@@ -422,7 +431,7 @@ public:
 
   /// Set the current section where code is being emitted to \p Section.
   /// This is required to update CurSection. This version does not call
-  /// ChangeSection.
+  /// changeSection.
   void SwitchSectionNoChange(MCSection *Section,
                              const MCExpr *Subsection = nullptr) {
     assert(Section && "Cannot switch to a null section!");
@@ -566,6 +575,25 @@ public:
                                           MCSymbol *CsectSym,
                                           unsigned ByteAlignment);
 
+  /// Emit a symbol's linkage and visibilty with a linkage directive for XCOFF.
+  ///
+  /// \param Symbol - The symbol to emit.
+  /// \param Linkage - The linkage of the symbol to emit.
+  /// \param Visibility - The visibility of the symbol to emit or MCSA_Invalid
+  /// if the symbol does not have an explicit visibility.
+  virtual void emitXCOFFSymbolLinkageWithVisibility(MCSymbol *Symbol,
+                                                    MCSymbolAttr Linkage,
+                                                    MCSymbolAttr Visibility);
+
+  /// Emit a XCOFF .rename directive which creates a synonym for an illegal or
+  /// undesirable name.
+  ///
+  /// \param Name - The name used internally in the assembly for references to
+  /// the symbol.
+  /// \param Rename - The value to which the Name parameter is
+  /// changed at the end of assembly.
+  virtual void emitXCOFFRenameDirective(const MCSymbol *Name, StringRef Rename);
+
   /// Emit an ELF .size directive.
   ///
   /// This corresponds to an assembler statement such as:
@@ -655,6 +683,7 @@ public:
   /// Special case of EmitValue that avoids the client having
   /// to pass in a MCExpr for constant integers.
   virtual void emitIntValue(uint64_t Value, unsigned Size);
+  virtual void emitIntValue(APInt Value);
 
   /// Special case of EmitValue that avoids the client having to pass
   /// in a MCExpr for constant integers & prints in Hex format for certain
@@ -758,6 +787,9 @@ public:
   /// \param Expr - The expression from which \p Size bytes are used.
   virtual void emitFill(const MCExpr &NumValues, int64_t Size, int64_t Expr,
                         SMLoc Loc = SMLoc());
+
+  virtual void emitNops(int64_t NumBytes, int64_t ControlledNopLength,
+                        SMLoc Loc);
 
   /// Emit NumBytes worth of zeros.
   /// This function properly handles data in virtual sections.
@@ -872,19 +904,19 @@ public:
                                            unsigned IACol, SMLoc Loc);
 
   /// This implements the CodeView '.cv_loc' assembler directive.
-  virtual void EmitCVLocDirective(unsigned FunctionId, unsigned FileNo,
+  virtual void emitCVLocDirective(unsigned FunctionId, unsigned FileNo,
                                   unsigned Line, unsigned Column,
                                   bool PrologueEnd, bool IsStmt,
                                   StringRef FileName, SMLoc Loc);
 
   /// This implements the CodeView '.cv_linetable' assembler directive.
-  virtual void EmitCVLinetableDirective(unsigned FunctionId,
+  virtual void emitCVLinetableDirective(unsigned FunctionId,
                                         const MCSymbol *FnStart,
                                         const MCSymbol *FnEnd);
 
   /// This implements the CodeView '.cv_inline_linetable' assembler
   /// directive.
-  virtual void EmitCVInlineLinetableDirective(unsigned PrimaryFunctionId,
+  virtual void emitCVInlineLinetableDirective(unsigned PrimaryFunctionId,
                                               unsigned SourceFileId,
                                               unsigned SourceLineNum,
                                               const MCSymbol *FnStartSym,
@@ -892,35 +924,35 @@ public:
 
   /// This implements the CodeView '.cv_def_range' assembler
   /// directive.
-  virtual void EmitCVDefRangeDirective(
+  virtual void emitCVDefRangeDirective(
       ArrayRef<std::pair<const MCSymbol *, const MCSymbol *>> Ranges,
       StringRef FixedSizePortion);
 
-  virtual void EmitCVDefRangeDirective(
+  virtual void emitCVDefRangeDirective(
       ArrayRef<std::pair<const MCSymbol *, const MCSymbol *>> Ranges,
       codeview::DefRangeRegisterRelHeader DRHdr);
 
-  virtual void EmitCVDefRangeDirective(
+  virtual void emitCVDefRangeDirective(
       ArrayRef<std::pair<const MCSymbol *, const MCSymbol *>> Ranges,
       codeview::DefRangeSubfieldRegisterHeader DRHdr);
 
-  virtual void EmitCVDefRangeDirective(
+  virtual void emitCVDefRangeDirective(
       ArrayRef<std::pair<const MCSymbol *, const MCSymbol *>> Ranges,
       codeview::DefRangeRegisterHeader DRHdr);
 
-  virtual void EmitCVDefRangeDirective(
+  virtual void emitCVDefRangeDirective(
       ArrayRef<std::pair<const MCSymbol *, const MCSymbol *>> Ranges,
       codeview::DefRangeFramePointerRelHeader DRHdr);
 
   /// This implements the CodeView '.cv_stringtable' assembler directive.
-  virtual void EmitCVStringTableDirective() {}
+  virtual void emitCVStringTableDirective() {}
 
   /// This implements the CodeView '.cv_filechecksums' assembler directive.
-  virtual void EmitCVFileChecksumsDirective() {}
+  virtual void emitCVFileChecksumsDirective() {}
 
   /// This implements the CodeView '.cv_filechecksumoffset' assembler
   /// directive.
-  virtual void EmitCVFileChecksumOffsetDirective(unsigned FileNo) {}
+  virtual void emitCVFileChecksumOffsetDirective(unsigned FileNo) {}
 
   /// This implements the CodeView '.cv_fpo_data' assembler directive.
   virtual void EmitCVFPOData(const MCSymbol *ProcSym, SMLoc Loc = {}) {}
@@ -996,13 +1028,12 @@ public:
 
   virtual void emitSyntaxDirective();
 
-  /// Emit a .reloc directive.
-  /// Returns true if the relocation could not be emitted because Name is not
-  /// known.
-  virtual bool emitRelocDirective(const MCExpr &Offset, StringRef Name,
-                                  const MCExpr *Expr, SMLoc Loc,
-                                  const MCSubtargetInfo &STI) {
-    return true;
+  /// Record a relocation described by the .reloc directive. Return None if
+  /// succeeded. Otherwise, return a pair (Name is invalid, error message).
+  virtual Optional<std::pair<bool, std::string>>
+  emitRelocDirective(const MCExpr &Offset, StringRef Name, const MCExpr *Expr,
+                     SMLoc Loc, const MCSubtargetInfo &STI) {
+    return None;
   }
 
   virtual void emitAddrsig() {}
@@ -1031,9 +1062,9 @@ public:
   void emitRawText(const Twine &String);
 
   /// Streamer specific finalization.
-  virtual void FinishImpl();
+  virtual void finishImpl();
   /// Finish emission of machine code.
-  void Finish();
+  void Finish(SMLoc EndLoc = SMLoc());
 
   virtual bool mayHaveInstructions(MCSection &Sec) const { return true; }
 };

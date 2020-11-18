@@ -10,20 +10,13 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "mlir/Analysis/AffineAnalysis.h"
-#include "mlir/Analysis/AffineStructures.h"
 #include "mlir/Analysis/Utils.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
-#include "mlir/IR/Builders.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/LoopFusionUtils.h"
 #include "mlir/Transforms/LoopUtils.h"
 #include "mlir/Transforms/Passes.h"
-
-#include "llvm/ADT/STLExtras.h"
-#include "llvm/Support/CommandLine.h"
-#include "llvm/Support/Debug.h"
 
 #define DEBUG_TYPE "test-loop-fusion"
 
@@ -48,7 +41,7 @@ static llvm::cl::opt<bool> clTestLoopFusionTransformation(
 
 namespace {
 
-struct TestLoopFusion : public FunctionPass<TestLoopFusion> {
+struct TestLoopFusion : public PassWrapper<TestLoopFusion, FunctionPass> {
   void runOnFunction() override;
 };
 
@@ -90,7 +83,7 @@ static std::string getSliceStr(const mlir::ComputationSliceState &sliceUnion) {
   std::string result;
   llvm::raw_string_ostream os(result);
   // Slice insertion point format [loop-depth, operation-block-index]
-  unsigned ipd = getNestingDepth(*sliceUnion.insertPoint);
+  unsigned ipd = getNestingDepth(&*sliceUnion.insertPoint);
   unsigned ipb = getBlockIndex(*sliceUnion.insertPoint);
   os << "insert point: (" << std::to_string(ipd) << ", " << std::to_string(ipb)
      << ")";
@@ -199,8 +192,10 @@ void TestLoopFusion::runOnFunction() {
 }
 
 namespace mlir {
+namespace test {
 void registerTestLoopFusion() {
   PassRegistration<TestLoopFusion>("test-loop-fusion",
                                    "Tests loop fusion utility functions.");
 }
+} // namespace test
 } // namespace mlir

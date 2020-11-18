@@ -32,17 +32,18 @@
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/CodeMetrics.h"
 #include "llvm/Analysis/InstructionSimplify.h"
+#include "llvm/Analysis/LazyBlockFrequencyInfo.h"
 #include "llvm/Analysis/LegacyDivergenceAnalysis.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/LoopIterator.h"
 #include "llvm/Analysis/LoopPass.h"
 #include "llvm/Analysis/MemorySSA.h"
 #include "llvm/Analysis/MemorySSAUpdater.h"
+#include "llvm/Analysis/MustExecute.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/BasicBlock.h"
-#include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constant.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -217,6 +218,10 @@ namespace {
     /// loop preheaders be inserted into the CFG.
     ///
     void getAnalysisUsage(AnalysisUsage &AU) const override {
+      // Lazy BFI and BPI are marked as preserved here so Loop Unswitching
+      // can remain part of the same loop pass as LICM
+      AU.addPreserved<LazyBlockFrequencyInfoPass>();
+      AU.addPreserved<LazyBranchProbabilityInfoPass>();
       AU.addRequired<AssumptionCacheTracker>();
       AU.addRequired<TargetTransformInfoWrapperPass>();
       if (EnableMSSALoopDependency) {
@@ -661,7 +666,7 @@ bool LoopUnswitch::processCurrentLoop() {
   // FIXME: Use Function::hasOptSize().
   if (OptimizeForSize ||
       LoopHeader->getParent()->hasFnAttribute(Attribute::OptimizeForSize))
-    return false;
+    return Changed;
 
   // Run through the instructions in the loop, keeping track of three things:
   //
@@ -681,13 +686,14 @@ bool LoopUnswitch::processCurrentLoop() {
 
   for (const auto BB : CurrentLoop->blocks()) {
     for (auto &I : *BB) {
-      auto CS = CallSite(&I);
-      if (!CS) continue;
-      if (CS.isConvergent())
-        return false;
+      auto *CB = dyn_cast<CallBase>(&I);
+      if (!CB)
+        continue;
+      if (CB->isConvergent())
+        return Changed;
       if (auto *II = dyn_cast<InvokeInst>(&I))
         if (!II->getUnwindDest()->canSplitPredecessors())
-          return false;
+          return Changed;
       if (auto *II = dyn_cast<IntrinsicInst>(&I))
         if (II->getIntrinsicID() == Intrinsic::experimental_guard)
           Guards.push_back(II);

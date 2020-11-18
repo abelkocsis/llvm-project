@@ -25,7 +25,6 @@ class StringRef;
 class ModuleSummaryIndex;
 class ModulePass;
 class Pass;
-class Function;
 class BasicBlock;
 class GlobalValue;
 class raw_ostream;
@@ -155,12 +154,6 @@ Pass *createArgumentPromotionPass(unsigned maxElements = 3);
 //===----------------------------------------------------------------------===//
 /// createOpenMPOptLegacyPass - OpenMP specific optimizations.
 Pass *createOpenMPOptLegacyPass();
-
-//===----------------------------------------------------------------------===//
-/// createIPConstantPropagationPass - This pass propagates constants from call
-/// sites into the bodies of functions.
-///
-ModulePass *createIPConstantPropagationPass();
 
 //===----------------------------------------------------------------------===//
 /// createIPSCCPPass - This pass propagates constants from call sites into the

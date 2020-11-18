@@ -16,7 +16,7 @@
 #include "mlir/Dialect/SPIRV/SPIRVTypes.h"
 #include "mlir/IR/Function.h"
 #include "mlir/Interfaces/ControlFlowInterfaces.h"
-#include "mlir/Interfaces/SideEffects.h"
+#include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "llvm/Support/PointerLikeTypeTraits.h"
 
 namespace mlir {
@@ -28,20 +28,21 @@ class VerCapExtAttr;
 // TableGen'erated operation interfaces for querying versions, extensions, and
 // capabilities.
 #include "mlir/Dialect/SPIRV/SPIRVAvailability.h.inc"
+} // namespace spirv
+} // namespace mlir
 
 // TablenGen'erated operation declarations.
 #define GET_OP_CLASSES
 #include "mlir/Dialect/SPIRV/SPIRVOps.h.inc"
 
+namespace mlir {
+namespace spirv {
 // TableGen'erated helper functions.
 //
 // Get the name used in the Op to refer to an enum value of the given
 // `EnumClass`.
 // template <typename EnumClass> StringRef attributeName();
 //
-// Get the function that can be used to symbolize an enum value.
-// template <typename EnumClass>
-// Optional<EnumClass> (*)(StringRef) symbolizeEnum();
 #include "mlir/Dialect/SPIRV/SPIRVOpUtils.inc"
 
 } // end namespace spirv

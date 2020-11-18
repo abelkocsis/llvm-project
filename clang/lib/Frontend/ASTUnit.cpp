@@ -69,6 +69,7 @@
 #include "llvm/ADT/None.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringMap.h"
@@ -224,7 +225,7 @@ struct ASTUnit::ASTWriterData {
 };
 
 void ASTUnit::clearFileLevelDecls() {
-  llvm::DeleteContainerSeconds(FileDecls);
+  FileDecls.clear();
 }
 
 /// After failing to build a precompiled preamble (due to
@@ -1118,6 +1119,19 @@ bool ASTUnit::Parse(std::shared_ptr<PCHContainerOperations> PCHContainerOps,
   std::unique_ptr<CompilerInstance> Clang(
       new CompilerInstance(std::move(PCHContainerOps)));
 
+  // Clean up on error, disengage it if the function returns successfully.
+  auto CleanOnError = llvm::make_scope_exit([&]() {
+    // Remove the overridden buffer we used for the preamble.
+    SavedMainFileBuffer = nullptr;
+
+    // Keep the ownership of the data in the ASTUnit because the client may
+    // want to see the diagnostics.
+    transferASTDataFromCompilerInstance(*Clang);
+    FailedParseDiagnostics.swap(StoredDiagnostics);
+    StoredDiagnostics.clear();
+    NumStoredDiagnosticsFromDriver = 0;
+  });
+
   // Ensure that Clang has a FileManager with the right VFS, which may have
   // changed above in AddImplicitPreamble.  If VFS is nullptr, rely on
   // createFileManager to create one.
@@ -1200,7 +1214,7 @@ bool ASTUnit::Parse(std::shared_ptr<PCHContainerOperations> PCHContainerOps,
     ActCleanup(Act.get());
 
   if (!Act->BeginSourceFile(*Clang.get(), Clang->getFrontendOpts().Inputs[0]))
-    goto error;
+    return true;
 
   if (SavedMainFileBuffer)
     TranslateStoredDiagnostics(getFileManager(), getSourceManager(),
@@ -1210,7 +1224,7 @@ bool ASTUnit::Parse(std::shared_ptr<PCHContainerOperations> PCHContainerOps,
 
   if (llvm::Error Err = Act->Execute()) {
     consumeError(std::move(Err)); // FIXME this drops errors on the floor.
-    goto error;
+    return true;
   }
 
   transferASTDataFromCompilerInstance(*Clang);
@@ -1219,19 +1233,9 @@ bool ASTUnit::Parse(std::shared_ptr<PCHContainerOperations> PCHContainerOps,
 
   FailedParseDiagnostics.clear();
 
+  CleanOnError.release();
+
   return false;
-
-error:
-  // Remove the overridden buffer we used for the preamble.
-  SavedMainFileBuffer = nullptr;
-
-  // Keep the ownership of the data in the ASTUnit because the client may
-  // want to see the diagnostics.
-  transferASTDataFromCompilerInstance(*Clang);
-  FailedParseDiagnostics.swap(StoredDiagnostics);
-  StoredDiagnostics.clear();
-  NumStoredDiagnosticsFromDriver = 0;
-  return true;
 }
 
 static std::pair<unsigned, unsigned>
@@ -1313,9 +1317,8 @@ ASTUnit::getMainBufferWithPrecompiledPreamble(
   if (!MainFileBuffer)
     return nullptr;
 
-  PreambleBounds Bounds =
-      ComputePreambleBounds(*PreambleInvocationIn.getLangOpts(),
-                            MainFileBuffer.get(), MaxLines);
+  PreambleBounds Bounds = ComputePreambleBounds(
+      *PreambleInvocationIn.getLangOpts(), *MainFileBuffer, MaxLines);
   if (!Bounds.Size)
     return nullptr;
 
@@ -1468,7 +1471,7 @@ StringRef ASTUnit::getMainFileName() const {
     if (Input.isFile())
       return Input.getFile();
     else
-      return Input.getBuffer()->getBufferIdentifier();
+      return Input.getBuffer().getBufferIdentifier();
   }
 
   if (SourceMgr) {
@@ -1517,8 +1520,7 @@ ASTUnit *ASTUnit::LoadFromCompilerInvocationAction(
     ASTUnit *Unit, bool Persistent, StringRef ResourceFilesPath,
     bool OnlyLocalDecls, CaptureDiagsKind CaptureDiagnostics,
     unsigned PrecompilePreambleAfterNParses, bool CacheCodeCompletionResults,
-    bool IncludeBriefCommentsInCodeCompletion, bool UserFilesAreVolatile,
-    std::unique_ptr<ASTUnit> *ErrAST) {
+    bool UserFilesAreVolatile, std::unique_ptr<ASTUnit> *ErrAST) {
   assert(CI && "A CompilerInvocation is required");
 
   std::unique_ptr<ASTUnit> OwnAST;
@@ -1541,8 +1543,7 @@ ASTUnit *ASTUnit::LoadFromCompilerInvocationAction(
     AST->PreambleRebuildCountdown = PrecompilePreambleAfterNParses;
   AST->TUKind = Action ? Action->getTranslationUnitKind() : TU_Complete;
   AST->ShouldCacheCodeCompletionResults = CacheCodeCompletionResults;
-  AST->IncludeBriefCommentsInCodeCompletion
-    = IncludeBriefCommentsInCodeCompletion;
+  AST->IncludeBriefCommentsInCodeCompletion = false;
 
   // Recover resources if we crash before exiting this method.
   llvm::CrashRecoveryContextCleanupRegistrar<ASTUnit>
@@ -2436,9 +2437,9 @@ void ASTUnit::addFileLevelDecl(Decl *D) {
   if (FID.isInvalid())
     return;
 
-  LocDeclsTy *&Decls = FileDecls[FID];
+  std::unique_ptr<LocDeclsTy> &Decls = FileDecls[FID];
   if (!Decls)
-    Decls = new LocDeclsTy();
+    Decls = std::make_unique<LocDeclsTy>();
 
   std::pair<unsigned, Decl *> LocDecl(Offset, D);
 

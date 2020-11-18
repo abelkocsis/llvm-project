@@ -178,7 +178,8 @@ void MachineModuleInfo::finalize() {
 MachineModuleInfo::MachineModuleInfo(MachineModuleInfo &&MMI)
     : TM(std::move(MMI.TM)),
       Context(MMI.TM.getMCAsmInfo(), MMI.TM.getMCRegisterInfo(),
-              MMI.TM.getObjFileLowering(), nullptr, nullptr, false) {
+              MMI.TM.getObjFileLowering(), nullptr, nullptr, false),
+      MachineFunctions(std::move(MMI.MachineFunctions)) {
   ObjFileMMI = MMI.ObjFileMMI;
   CurCallSite = MMI.CurCallSite;
   UsesMSVCFloatingPoint = MMI.UsesMSVCFloatingPoint;
@@ -225,8 +226,7 @@ MachineModuleInfo::getMachineFunction(const Function &F) const {
   return I != MachineFunctions.end() ? I->second.get() : nullptr;
 }
 
-MachineFunction &
-MachineModuleInfo::getOrCreateMachineFunction(const Function &F) {
+MachineFunction &MachineModuleInfo::getOrCreateMachineFunction(Function &F) {
   // Shortcut for the common case where a sequence of MachineFunctionPasses
   // all query for the same Function.
   if (LastRequest == &F)

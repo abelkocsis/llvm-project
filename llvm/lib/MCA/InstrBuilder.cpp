@@ -160,8 +160,11 @@ static void initializeUsedResources(InstrDesc &ID,
     if (countPopulation(RPC.first) > 1 && !RPC.second.isReserved()) {
       // Remove the leading 1 from the resource group mask.
       uint64_t Mask = RPC.first ^ PowerOf2Floor(RPC.first);
-      if ((Mask & UsedResourceUnits) == Mask)
+      uint64_t MaxResourceUnits = countPopulation(Mask);
+      if (RPC.second.NumUnits > countPopulation(Mask)) {
         RPC.second.setReserved();
+        RPC.second.NumUnits = MaxResourceUnits;
+      }
     }
   }
 
@@ -515,7 +518,8 @@ InstrBuilder::createInstrDescImpl(const MCInst &MCI) {
   if (IsVariant) {
     unsigned CPUID = SM.getProcessorID();
     while (SchedClassID && SM.getSchedClassDesc(SchedClassID)->isVariant())
-      SchedClassID = STI.resolveVariantSchedClass(SchedClassID, &MCI, CPUID);
+      SchedClassID =
+          STI.resolveVariantSchedClass(SchedClassID, &MCI, &MCII, CPUID);
 
     if (!SchedClassID) {
       return make_error<InstructionError<MCInst>>(

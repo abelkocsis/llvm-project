@@ -29,6 +29,7 @@
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/Analysis/BasicAliasAnalysis.h"
 #include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Argument.h"
@@ -919,6 +920,46 @@ static Value *NegateValue(Value *V, Instruction *BI,
   return NewNeg;
 }
 
+/// Return true if it may be profitable to convert this (X|Y) into (X+Y).
+static bool ShouldConvertOrWithNoCommonBitsToAdd(Instruction *Or) {
+  // Don't bother to convert this up unless either the LHS is an associable add
+  // or subtract or mul or if this is only used by one of the above.
+  // This is only a compile-time improvement, it is not needed for correctness!
+  auto isInteresting = [](Value *V) {
+    for (auto Op : {Instruction::Add, Instruction::Sub, Instruction::Mul})
+      if (isReassociableOp(V, Op))
+        return true;
+    return false;
+  };
+
+  if (any_of(Or->operands(), isInteresting))
+    return true;
+
+  Value *VB = Or->user_back();
+  if (Or->hasOneUse() && isInteresting(VB))
+    return true;
+
+  return false;
+}
+
+/// If we have (X|Y), and iff X and Y have no common bits set,
+/// transform this into (X+Y) to allow arithmetics reassociation.
+static BinaryOperator *ConvertOrWithNoCommonBitsToAdd(Instruction *Or) {
+  // Convert an or into an add.
+  BinaryOperator *New =
+      CreateAdd(Or->getOperand(0), Or->getOperand(1), "", Or, Or);
+  New->setHasNoSignedWrap();
+  New->setHasNoUnsignedWrap();
+  New->takeName(Or);
+
+  // Everyone now refers to the add instruction.
+  Or->replaceAllUsesWith(New);
+  New->setDebugLoc(Or->getDebugLoc());
+
+  LLVM_DEBUG(dbgs() << "Converted or into an add: " << *New << '\n');
+  return New;
+}
+
 /// Return true if we should break up this subtract of X-Y into (X + -Y).
 static bool ShouldBreakUpSubtract(Instruction *Sub) {
   // If this is a negation, we can't split it up!
@@ -975,7 +1016,8 @@ static BinaryOperator *BreakUpSubtract(Instruction *Sub,
 /// this into a multiply by a constant to assist with further reassociation.
 static BinaryOperator *ConvertShiftToMul(Instruction *Shl) {
   Constant *MulCst = ConstantInt::get(Shl->getType(), 1);
-  MulCst = ConstantExpr::getShl(MulCst, cast<Constant>(Shl->getOperand(1)));
+  auto *SA = cast<ConstantInt>(Shl->getOperand(1));
+  MulCst = ConstantExpr::getShl(MulCst, SA);
 
   BinaryOperator *Mul =
     BinaryOperator::CreateMul(Shl->getOperand(0), MulCst, "", Shl);
@@ -988,10 +1030,12 @@ static BinaryOperator *ConvertShiftToMul(Instruction *Shl) {
 
   // We can safely preserve the nuw flag in all cases.  It's also safe to turn a
   // nuw nsw shl into a nuw nsw mul.  However, nsw in isolation requires special
-  // handling.
+  // handling.  It can be preserved as long as we're not left shifting by
+  // bitwidth - 1.
   bool NSW = cast<BinaryOperator>(Shl)->hasNoSignedWrap();
   bool NUW = cast<BinaryOperator>(Shl)->hasNoUnsignedWrap();
-  if (NSW && NUW)
+  unsigned BitWidth = Shl->getType()->getIntegerBitWidth();
+  if (NSW && (NUW || SA->getValue().ult(BitWidth - 1)))
     Mul->setHasNoSignedWrap(true);
   Mul->setHasNoUnsignedWrap(NUW);
   return Mul;
@@ -1899,7 +1943,7 @@ void ReassociatePass::RecursivelyEraseDeadInsts(Instruction *I,
   ValueRankMap.erase(I);
   Insts.remove(I);
   RedoInsts.remove(I);
-  llvm::salvageDebugInfoOrMarkUndef(*I);
+  llvm::salvageDebugInfo(*I);
   I->eraseFromParent();
   for (auto Op : Ops)
     if (Instruction *OpInst = dyn_cast<Instruction>(Op))
@@ -1916,7 +1960,7 @@ void ReassociatePass::EraseInst(Instruction *I) {
   // Erase the dead instruction.
   ValueRankMap.erase(I);
   RedoInsts.remove(I);
-  llvm::salvageDebugInfoOrMarkUndef(*I);
+  llvm::salvageDebugInfo(*I);
   I->eraseFromParent();
   // Optimize its operands.
   SmallPtrSet<Instruction *, 8> Visited; // Detect self-referential nodes.
@@ -2111,6 +2155,19 @@ void ReassociatePass::OptimizeInst(Instruction *I) {
   // optimized for the most likely conditions.
   if (I->getType()->isIntegerTy(1))
     return;
+
+  // If this is a bitwise or instruction of operands
+  // with no common bits set, convert it to X+Y.
+  if (I->getOpcode() == Instruction::Or &&
+      ShouldConvertOrWithNoCommonBitsToAdd(I) &&
+      haveNoCommonBitsSet(I->getOperand(0), I->getOperand(1),
+                          I->getModule()->getDataLayout(), /*AC=*/nullptr, I,
+                          /*DT=*/nullptr)) {
+    Instruction *NI = ConvertOrWithNoCommonBitsToAdd(I);
+    RedoInsts.insert(I);
+    MadeChange = true;
+    I = NI;
+  }
 
   // If this is a subtract instruction which is not already in negate form,
   // see if we can convert it to X+-Y.
@@ -2457,6 +2514,8 @@ PreservedAnalyses ReassociatePass::run(Function &F, FunctionAnalysisManager &) {
   if (MadeChange) {
     PreservedAnalyses PA;
     PA.preserveSet<CFGAnalyses>();
+    PA.preserve<AAManager>();
+    PA.preserve<BasicAA>();
     PA.preserve<GlobalsAA>();
     return PA;
   }
@@ -2487,6 +2546,8 @@ namespace {
 
     void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.setPreservesCFG();
+      AU.addPreserved<AAResultsWrapperPass>();
+      AU.addPreserved<BasicAAWrapperPass>();
       AU.addPreserved<GlobalsAAWrapperPass>();
     }
   };

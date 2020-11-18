@@ -84,23 +84,38 @@ SANITIZER_INTERFACE_ATTRIBUTE char *__dfsw_strchr(const char *s, int c,
         *ret_label = dfsan_union(dfsan_read_label(s, i + 1),
                                  dfsan_union(s_label, c_label));
       }
-      return s[i] == 0 ? nullptr : const_cast<char *>(s+i);
+
+      // If s[i] is the \0 at the end of the string, and \0 is not the
+      // character we are searching for, then return null.
+      if (s[i] == 0 && c != 0) {
+        return nullptr;
+      }
+      return const_cast<char *>(s + i);
     }
   }
 }
 
-DECLARE_WEAK_INTERCEPTOR_HOOK(dfsan_weak_hook_memcmp, uptr caller_pc,
-                              const void *s1, const void *s2, size_t n,
-                              dfsan_label s1_label, dfsan_label s2_label,
-                              dfsan_label n_label)
+SANITIZER_INTERFACE_ATTRIBUTE char *__dfsw_strpbrk(const char *s,
+                                                   const char *accept,
+                                                   dfsan_label s_label,
+                                                   dfsan_label accept_label,
+                                                   dfsan_label *ret_label) {
+  const char *ret = strpbrk(s, accept);
+  if (flags().strict_data_dependencies) {
+    *ret_label = ret ? s_label : 0;
+  } else {
+    size_t s_bytes_read = (ret ? ret - s : strlen(s)) + 1;
+    *ret_label =
+        dfsan_union(dfsan_read_label(s, s_bytes_read),
+                    dfsan_union(dfsan_read_label(accept, strlen(accept) + 1),
+                                dfsan_union(s_label, accept_label)));
+  }
+  return const_cast<char *>(ret);
+}
 
-SANITIZER_INTERFACE_ATTRIBUTE int __dfsw_memcmp(const void *s1, const void *s2,
-                                                size_t n, dfsan_label s1_label,
-                                                dfsan_label s2_label,
-                                                dfsan_label n_label,
-                                                dfsan_label *ret_label) {
-  CALL_WEAK_INTERCEPTOR_HOOK(dfsan_weak_hook_memcmp, GET_CALLER_PC(), s1, s2, n,
-                             s1_label, s2_label, n_label);
+static int dfsan_memcmp_bcmp(const void *s1, const void *s2, size_t n,
+                             dfsan_label s1_label, dfsan_label s2_label,
+                             dfsan_label n_label, dfsan_label *ret_label) {
   const char *cs1 = (const char *) s1, *cs2 = (const char *) s2;
   for (size_t i = 0; i != n; ++i) {
     if (cs1[i] != cs2[i]) {
@@ -121,6 +136,29 @@ SANITIZER_INTERFACE_ATTRIBUTE int __dfsw_memcmp(const void *s1, const void *s2,
                              dfsan_read_label(cs2, n));
   }
   return 0;
+}
+
+DECLARE_WEAK_INTERCEPTOR_HOOK(dfsan_weak_hook_memcmp, uptr caller_pc,
+                              const void *s1, const void *s2, size_t n,
+                              dfsan_label s1_label, dfsan_label s2_label,
+                              dfsan_label n_label)
+
+SANITIZER_INTERFACE_ATTRIBUTE int __dfsw_memcmp(const void *s1, const void *s2,
+                                                size_t n, dfsan_label s1_label,
+                                                dfsan_label s2_label,
+                                                dfsan_label n_label,
+                                                dfsan_label *ret_label) {
+  CALL_WEAK_INTERCEPTOR_HOOK(dfsan_weak_hook_memcmp, GET_CALLER_PC(), s1, s2, n,
+                             s1_label, s2_label, n_label);
+  return dfsan_memcmp_bcmp(s1, s2, n, s1_label, s2_label, n_label, ret_label);
+}
+
+SANITIZER_INTERFACE_ATTRIBUTE int __dfsw_bcmp(const void *s1, const void *s2,
+                                              size_t n, dfsan_label s1_label,
+                                              dfsan_label s2_label,
+                                              dfsan_label n_label,
+                                              dfsan_label *ret_label) {
+  return dfsan_memcmp_bcmp(s1, s2, n, s1_label, s2_label, n_label, ret_label);
 }
 
 DECLARE_WEAK_INTERCEPTOR_HOOK(dfsan_weak_hook_strcmp, uptr caller_pc,
@@ -151,14 +189,17 @@ SANITIZER_INTERFACE_ATTRIBUTE int
 __dfsw_strcasecmp(const char *s1, const char *s2, dfsan_label s1_label,
                   dfsan_label s2_label, dfsan_label *ret_label) {
   for (size_t i = 0;; ++i) {
-    if (tolower(s1[i]) != tolower(s2[i]) || s1[i] == 0 || s2[i] == 0) {
+    char s1_lower = tolower(s1[i]);
+    char s2_lower = tolower(s2[i]);
+
+    if (s1_lower != s2_lower || s1[i] == 0 || s2[i] == 0) {
       if (flags().strict_data_dependencies) {
         *ret_label = 0;
       } else {
         *ret_label = dfsan_union(dfsan_read_label(s1, i + 1),
                                  dfsan_read_label(s2, i + 1));
       }
-      return s1[i] - s2[i];
+      return s1_lower - s2_lower;
     }
   }
   return 0;
@@ -206,15 +247,17 @@ __dfsw_strncasecmp(const char *s1, const char *s2, size_t n,
   }
 
   for (size_t i = 0;; ++i) {
-    if (tolower(s1[i]) != tolower(s2[i]) || s1[i] == 0 || s2[i] == 0 ||
-        i == n - 1) {
+    char s1_lower = tolower(s1[i]);
+    char s2_lower = tolower(s2[i]);
+
+    if (s1_lower != s2_lower || s1[i] == 0 || s2[i] == 0 || i == n - 1) {
       if (flags().strict_data_dependencies) {
         *ret_label = 0;
       } else {
         *ret_label = dfsan_union(dfsan_read_label(s1, i + 1),
                                  dfsan_read_label(s2, i + 1));
       }
-      return s1[i] - s2[i];
+      return s1_lower - s2_lower;
     }
   }
   return 0;
@@ -596,8 +639,8 @@ unsigned long int __dfsw_strtoul(const char *nptr, char **endptr, int base,
 
 SANITIZER_INTERFACE_ATTRIBUTE
 long long unsigned int __dfsw_strtoull(const char *nptr, char **endptr,
-                                       dfsan_label nptr_label,
-                                       int base, dfsan_label endptr_label,
+                                       int base, dfsan_label nptr_label,
+                                       dfsan_label endptr_label,
                                        dfsan_label base_label,
                                        dfsan_label *ret_label) {
   char *tmp_endptr;

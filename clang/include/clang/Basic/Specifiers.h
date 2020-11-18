@@ -37,12 +37,7 @@ namespace clang {
   };
 
   /// Specifies the width of a type, e.g., short, long, or long long.
-  enum TypeSpecifierWidth {
-    TSW_unspecified,
-    TSW_short,
-    TSW_long,
-    TSW_longlong
-  };
+  enum class TypeSpecifierWidth { Unspecified, Short, Long, LongLong };
 
   /// Specifies the signedness of a type, e.g., signed or unsigned.
   enum TypeSpecifierSign {
@@ -67,10 +62,12 @@ namespace clang {
     TST_char32,       // C++11 char32_t
     TST_int,
     TST_int128,
+    TST_extint,       // Extended Int types.
     TST_half,         // OpenCL half, ARM NEON __fp16
     TST_Float16,      // C11 extension ISO/IEC TS 18661-3
     TST_Accum,        // ISO/IEC JTC1 SC22 WG14 N1169 Extension
     TST_Fract,
+    TST_BFloat16,
     TST_float,
     TST_double,
     TST_float128,
@@ -104,7 +101,7 @@ namespace clang {
     static_assert(TST_error < 1 << 6, "Type bitfield not wide enough for TST");
     /*DeclSpec::TST*/ unsigned Type  : 6;
     /*DeclSpec::TSS*/ unsigned Sign  : 2;
-    /*DeclSpec::TSW*/ unsigned Width : 2;
+    /*TypeSpecifierWidth*/ unsigned Width : 2;
     unsigned ModeAttr : 1;
   };
 
@@ -153,7 +150,10 @@ namespace clang {
     /// An Objective-C array/dictionary subscripting which reads an
     /// object or writes at the subscripted array/dictionary element via
     /// Objective-C method calls.
-    OK_ObjCSubscript
+    OK_ObjCSubscript,
+
+    /// A matrix component is a single element of a matrix.
+    OK_MatrixComponent
   };
 
   /// The reason why a DeclRefExpr does not constitute an odr-use.
@@ -364,6 +364,20 @@ namespace clang {
   };
 
   llvm::StringRef getParameterABISpelling(ParameterABI kind);
+
+  inline llvm::StringRef getAccessSpelling(AccessSpecifier AS) {
+    switch (AS) {
+    case AccessSpecifier::AS_public:
+      return "public";
+    case AccessSpecifier::AS_protected:
+      return "protected";
+    case AccessSpecifier::AS_private:
+      return "private";
+    case AccessSpecifier::AS_none:
+      return {};
+    }
+    llvm_unreachable("Unknown AccessSpecifier");
+  }
 } // end namespace clang
 
 #endif // LLVM_CLANG_BASIC_SPECIFIERS_H

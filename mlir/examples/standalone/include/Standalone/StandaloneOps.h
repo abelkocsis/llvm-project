@@ -11,15 +11,9 @@
 
 #include "mlir/IR/Dialect.h"
 #include "mlir/IR/OpDefinition.h"
-#include "mlir/Interfaces/SideEffects.h"
-
-namespace mlir {
-namespace standalone {
+#include "mlir/Interfaces/SideEffectInterfaces.h"
 
 #define GET_OP_CLASSES
 #include "Standalone/StandaloneOps.h.inc"
-
-} // namespace standalone
-} // namespace mlir
 
 #endif // STANDALONE_STANDALONEOPS_H

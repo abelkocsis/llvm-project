@@ -38,8 +38,6 @@ class DWARFCache;
 std::string toString(const elf::InputFile *f);
 
 namespace elf {
-class InputFile;
-class InputSectionBase;
 
 using llvm::object::Archive;
 
@@ -93,6 +91,9 @@ public:
            fileKind == BitcodeKind);
     return symbols;
   }
+
+  // Get filename to use for linker script processing.
+  StringRef getNameForScript() const;
 
   // Filename of .a which contained this file. If this file was
   // not in an archive file, it is the empty string. We use this
@@ -149,6 +150,9 @@ protected:
 
 private:
   const Kind fileKind;
+
+  // Cache for getNameForScript().
+  mutable std::string nameForScriptCache;
 };
 
 class ELFFileBase : public InputFile {
@@ -309,6 +313,8 @@ public:
   template <class ELFT> void parse();
   void fetch();
 
+  bool fetched = false;
+
 private:
   uint64_t offsetInArchive;
 };
@@ -325,6 +331,11 @@ public:
   // function does nothing (so we don't instantiate the same file
   // more than once.)
   void fetch(const Archive::Symbol &sym);
+
+  size_t getMemberCount() const;
+  size_t getFetchedMemberCount() const { return seen.size(); }
+
+  bool parsed = false;
 
 private:
   std::unique_ptr<Archive> file;
@@ -369,6 +380,11 @@ public:
 
   // Used for --as-needed
   bool isNeeded;
+
+private:
+  template <typename ELFT>
+  std::vector<uint32_t> parseVerneed(const llvm::object::ELFFile<ELFT> &obj,
+                                     const typename ELFT::Shdr *sec);
 };
 
 class BinaryFile : public InputFile {
@@ -387,6 +403,7 @@ inline bool isBitcode(MemoryBufferRef mb) {
 
 std::string replaceThinLTOSuffix(StringRef path);
 
+extern std::vector<ArchiveFile *> archiveFiles;
 extern std::vector<BinaryFile *> binaryFiles;
 extern std::vector<BitcodeFile *> bitcodeFiles;
 extern std::vector<LazyObjFile *> lazyObjFiles;

@@ -429,8 +429,8 @@ namespace dr330 { // dr330: 7
 
 namespace dr331 { // dr331: yes
   struct A {
-    A(volatile A&); // expected-note {{candidate}}
-  } const a, b(a); // expected-error {{no matching constructor}}
+    A(volatile A&); // expected-note 2{{candidate}}
+  } const a, b(a); // expected-error 2{{no matching constructor}}
 }
 
 namespace dr332 { // dr332: dup 577
@@ -895,19 +895,19 @@ namespace dr367 { // dr367: yes
   // array as being a VLA!
   int a[true ? throw 0 : 4]; // expected-error 2{{variable length array}}
   int b[true ? 4 : throw 0];
-  int c[true ? *new int : 4]; // expected-error 2{{variable length array}}
+  int c[true ? *new int : 4]; // expected-error 2{{variable length array}} expected-note {{read of uninitialized}}
   int d[true ? 4 : *new int];
 #if __cplusplus < 201103L
-  // expected-error@-4 {{variable length array}} expected-error@-4 {{constant expression}}
-  // expected-error@-3 {{variable length array}} expected-error@-3 {{constant expression}}
+  // expected-error@-4 2{{variable length array}}
+  // expected-error@-3 2{{variable length array}}
 #endif
 }
 
 namespace dr368 { // dr368: yes
   template<typename T, T> struct S {}; // expected-note {{here}}
   template<typename T> int f(S<T, T()> *); // expected-error {{function type}}
-  //template<typename T> int g(S<T, (T())> *); // FIXME: crashes clang
-  template<typename T> int g(S<T, true ? T() : T()> *); // expected-note {{cannot have type 'dr368::X'}}
+  template<typename T> int g(S<T, (T())> *); // expected-note {{type 'dr368::X'}}
+  template<typename T> int g(S<T, true ? T() : T()> *); // expected-note {{type 'dr368::X'}}
   struct X {};
   int n = g<X>(0); // expected-error {{no matching}}
 }

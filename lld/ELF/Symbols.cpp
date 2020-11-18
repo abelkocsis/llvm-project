@@ -16,14 +16,16 @@
 #include "lld/Common/ErrorHandler.h"
 #include "lld/Common/Strings.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include <cstring>
 
 using namespace llvm;
 using namespace llvm::object;
 using namespace llvm::ELF;
+using namespace lld;
+using namespace lld::elf;
 
-namespace lld {
 // Returns a symbol for an error message.
 static std::string demangle(StringRef symName) {
   if (elf::config->demangle)
@@ -31,7 +33,7 @@ static std::string demangle(StringRef symName) {
   return std::string(symName);
 }
 
-std::string toString(const elf::Symbol &sym) {
+std::string lld::toString(const elf::Symbol &sym) {
   StringRef name = sym.getName();
   std::string ret = demangle(name);
 
@@ -43,11 +45,10 @@ std::string toString(const elf::Symbol &sym) {
   return ret;
 }
 
-std::string toELFString(const Archive::Symbol &b) {
+std::string lld::toELFString(const Archive::Symbol &b) {
   return demangle(b.getName());
 }
 
-namespace elf {
 Defined *ElfSym::bss;
 Defined *ElfSym::etext1;
 Defined *ElfSym::etext2;
@@ -63,6 +64,8 @@ Defined *ElfSym::relaIpltStart;
 Defined *ElfSym::relaIpltEnd;
 Defined *ElfSym::riscvGlobalPointer;
 Defined *ElfSym::tlsModuleBase;
+DenseMap<const Symbol *, std::pair<const InputFile *, const InputFile *>>
+    elf::backwardReferences;
 
 static uint64_t getSymVA(const Symbol &sym, int64_t &addend) {
   switch (sym.kind()) {
@@ -276,7 +279,7 @@ uint8_t Symbol::computeBinding() const {
   if (config->relocatable)
     return binding;
   if ((visibility != STV_DEFAULT && visibility != STV_PROTECTED) ||
-      versionId == VER_NDX_LOCAL)
+      (versionId == VER_NDX_LOCAL && isDefined()))
     return STB_LOCAL;
   if (!config->gnuUnique && binding == STB_GNU_UNIQUE)
     return STB_GLOBAL;
@@ -299,7 +302,7 @@ bool Symbol::includeInDynsym() const {
 }
 
 // Print out a log message for --trace-symbol.
-void printTraceSymbol(const Symbol *sym) {
+void elf::printTraceSymbol(const Symbol *sym) {
   std::string s;
   if (sym->isUndefined())
     s = ": reference to ";
@@ -315,7 +318,7 @@ void printTraceSymbol(const Symbol *sym) {
   message(toString(sym->file) + s + sym->getName());
 }
 
-void maybeWarnUnorderableSymbol(const Symbol *sym) {
+void elf::maybeWarnUnorderableSymbol(const Symbol *sym) {
   if (!config->warnSymbolOrdering)
     return;
 
@@ -347,7 +350,7 @@ void maybeWarnUnorderableSymbol(const Symbol *sym) {
 
 // Returns true if a symbol can be replaced at load-time by a symbol
 // with the same name defined in other ELF executable or DSO.
-bool computeIsPreemptible(const Symbol &sym) {
+bool elf::computeIsPreemptible(const Symbol &sym) {
   assert(!sym.isLocal());
 
   // Only symbols with default visibility that appear in dynsym can be
@@ -363,14 +366,30 @@ bool computeIsPreemptible(const Symbol &sym) {
   if (!config->shared)
     return false;
 
-  // If the dynamic list is present, it specifies preemptable symbols in a DSO.
-  if (config->hasDynamicList)
+  // If -Bsymbolic or --dynamic-list is specified, or -Bsymbolic-functions is
+  // specified and the symbol is STT_FUNC, the symbol is preemptible iff it is
+  // in the dynamic list.
+  if (config->symbolic || (config->bsymbolicFunctions && sym.isFunc()))
     return sym.inDynamicList;
-
-  // -Bsymbolic means that definitions are not preempted.
-  if (config->bsymbolic || (config->bsymbolicFunctions && sym.isFunc()))
-    return false;
   return true;
+}
+
+void elf::reportBackrefs() {
+  for (auto &it : backwardReferences) {
+    const Symbol &sym = *it.first;
+    std::string to = toString(it.second.second);
+    // Some libraries have known problems and can cause noise. Filter them out
+    // with --warn-backrefs-exclude=. to may look like *.o or *.a(*.o).
+    bool exclude = false;
+    for (const llvm::GlobPattern &pat : config->warnBackrefsExclude)
+      if (pat.match(to)) {
+        exclude = true;
+        break;
+      }
+    if (!exclude)
+      warn("backward reference detected: " + sym.getName() + " in " +
+           toString(it.second.first) + " refers to " + to);
+  }
 }
 
 static uint8_t getMinVisibility(uint8_t va, uint8_t vb) {
@@ -509,9 +528,14 @@ void Symbol::resolveUndefined(const Undefined &other) {
 
     // We don't report backward references to weak symbols as they can be
     // overridden later.
+    //
+    // A traditional linker does not error for -ldef1 -lref -ldef2 (linking
+    // sandwich), where def2 may or may not be the same as def1. We don't want
+    // to warn for this case, so dismiss the warning if we see a subsequent lazy
+    // definition. this->file needs to be saved because in the case of LTO it
+    // may be reset to nullptr or be replaced with a file named lto.tmp.
     if (backref && !isWeak())
-      warn("backward reference detected: " + other.getName() + " in " +
-           toString(other.file) + " refers to " + toString(file));
+      backwardReferences.try_emplace(this, std::make_pair(other.file, file));
     return;
   }
 
@@ -668,8 +692,12 @@ void Symbol::resolveDefined(const Defined &other) {
 }
 
 template <class LazyT> void Symbol::resolveLazy(const LazyT &other) {
-  if (!isUndefined())
+  if (!isUndefined()) {
+    // See the comment in resolveUndefined().
+    if (isDefined())
+      backwardReferences.erase(this);
     return;
+  }
 
   // An undefined weak will not fetch archive members. See comment on Lazy in
   // Symbols.h for the details.
@@ -697,8 +725,6 @@ void Symbol::resolveShared(const SharedSymbol &other) {
     uint8_t bind = binding;
     replace(other);
     binding = bind;
-  }
+  } else if (traced)
+    printTraceSymbol(&other);
 }
-
-} // namespace elf
-} // namespace lld

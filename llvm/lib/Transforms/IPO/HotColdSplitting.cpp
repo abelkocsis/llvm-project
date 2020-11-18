@@ -39,7 +39,6 @@
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
-#include "llvm/IR/CallSite.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/Dominators.h"
@@ -70,6 +69,7 @@
 #include "llvm/Transforms/Utils/ValueMapper.h"
 #include <algorithm>
 #include <cassert>
+#include <string>
 
 #define DEBUG_TYPE "hotcoldsplit"
 
@@ -78,13 +78,24 @@ STATISTIC(NumColdRegionsOutlined, "Number of cold regions outlined.");
 
 using namespace llvm;
 
-static cl::opt<bool> EnableStaticAnalyis("hot-cold-static-analysis",
-                              cl::init(true), cl::Hidden);
+static cl::opt<bool> EnableStaticAnalysis("hot-cold-static-analysis",
+                                          cl::init(true), cl::Hidden);
 
 static cl::opt<int>
     SplittingThreshold("hotcoldsplit-threshold", cl::init(2), cl::Hidden,
                        cl::desc("Base penalty for splitting cold code (as a "
                                 "multiple of TCC_Basic)"));
+
+static cl::opt<bool> EnableColdSection(
+    "enable-cold-section", cl::init(false), cl::Hidden,
+    cl::desc("Enable placement of extracted cold functions"
+             " into a separate section after hot-cold splitting."));
+
+static cl::opt<std::string>
+    ColdSectionName("hotcoldsplit-cold-section-name", cl::init("__llvm_cold"),
+                    cl::Hidden,
+                    cl::desc("Name for the section containing cold functions "
+                             "extracted by hot-cold splitting."));
 
 namespace {
 // Same as blockEndsInUnreachable in CodeGen/BranchFolding.cpp. Do not modify
@@ -110,8 +121,8 @@ bool unlikelyExecuted(BasicBlock &BB) {
   // The block is cold if it calls/invokes a cold function. However, do not
   // mark sanitizer traps as cold.
   for (Instruction &I : BB)
-    if (auto CS = CallSite(&I))
-      if (CS.hasFnAttr(Attribute::Cold) && !CS->getMetadata("nosanitize"))
+    if (auto *CB = dyn_cast<CallBase>(&I))
+      if (CB->hasFnAttr(Attribute::Cold) && !CB->getMetadata("nosanitize"))
         return true;
 
   // The block is cold if it has an unreachable terminator, unless it's
@@ -325,16 +336,19 @@ Function *HotColdSplitting::extractColdRegion(
   if (Function *OutF = CE.extractCodeRegion(CEAC)) {
     User *U = *OutF->user_begin();
     CallInst *CI = cast<CallInst>(U);
-    CallSite CS(CI);
     NumColdRegionsOutlined++;
     if (TTI.useColdCCForColdCall(*OutF)) {
       OutF->setCallingConv(CallingConv::Cold);
-      CS.setCallingConv(CallingConv::Cold);
+      CI->setCallingConv(CallingConv::Cold);
     }
     CI->setIsNoInline();
 
-    if (OrigF->hasSection())
-      OutF->setSection(OrigF->getSection());
+    if (EnableColdSection)
+      OutF->setSection(ColdSectionName);
+    else {
+      if (OrigF->hasSection())
+        OutF->setSection(OrigF->getSection());
+    }
 
     markFunctionCold(*OutF, BFI != nullptr);
 
@@ -577,7 +591,7 @@ bool HotColdSplitting::outlineColdRegions(Function &F, bool HasProfileSummary) {
       continue;
 
     bool Cold = (BFI && PSI->isColdBlock(BB, BFI)) ||
-                (EnableStaticAnalyis && unlikelyExecuted(*BB));
+                (EnableStaticAnalysis && unlikelyExecuted(*BB));
     if (!Cold)
       continue;
 

@@ -1,4 +1,4 @@
-//===----------------- Implementation of __assert_fail --------------------===//
+//===-- Implementation of __assert_fail -----------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "src/assert/assert.h"
+#include "src/assert/__assert_fail.h"
 #include "src/stdlib/abort.h"
 
 // These includes are temporary.

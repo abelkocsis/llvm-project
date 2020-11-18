@@ -13,7 +13,7 @@
 
 // Define the kinds of options.
 
-class OptionKind<string name, int precedence = 0, bit sentinel = 0> {
+class OptionKind<string name, int precedence = 0, bit sentinel = false> {
   string Name = name;
   // The kind precedence, kinds with lower precedence are matched first.
   int Precedence = precedence;
@@ -24,9 +24,9 @@ class OptionKind<string name, int precedence = 0, bit sentinel = 0> {
 // An option group.
 def KIND_GROUP : OptionKind<"Group">;
 // The input option kind.
-def KIND_INPUT : OptionKind<"Input", 1, 1>;
+def KIND_INPUT : OptionKind<"Input", 1, true>;
 // The unknown option kind.
-def KIND_UNKNOWN : OptionKind<"Unknown", 2, 1>;
+def KIND_UNKNOWN : OptionKind<"Unknown", 2, true>;
 // A flag with no values.
 def KIND_FLAG : OptionKind<"Flag">;
 // An option which prefixes its (single) value.
@@ -97,6 +97,16 @@ class Option<list<string> prefixes, string name, OptionKind kind> {
   OptionGroup Group = ?;
   Option Alias = ?;
   list<string> AliasArgs = [];
+  code KeyPath = ?;
+  code DefaultValue = ?;
+  bit ShouldAlwaysEmit = false;
+  code NormalizerRetTy = ?;
+  code NormalizedValuesScope = "";
+  code Normalizer = "";
+  code Denormalizer = "";
+  code ValueMerger = "mergeForwardValue";
+  code ValueExtractor = "extractForwardValue";
+  list<code> NormalizedValues = ?;
 }
 
 // Helpers for defining options.
@@ -129,6 +139,54 @@ class HelpText<string text> { string HelpText = text; }
 class MetaVarName<string name> { string MetaVarName = name; }
 class Values<string value> { string Values = value; }
 class ValuesCode<code valuecode> { code ValuesCode = valuecode; }
+
+// Helpers for defining marshalling information.
+
+class DefaultAnyOf<list<Option> options, string default = "false", string separator = " || "> {
+  code DefaultValue = !foldl(default, options, accumulator, option,
+                             !strconcat(accumulator, separator, !cast<string>(option.KeyPath)));
+}
+
+class MarshallingInfo<code keypath, code defaultvalue> {
+  code KeyPath = keypath;
+  code DefaultValue = defaultvalue;
+}
+
+class MarshallingInfoString<code keypath, code defaultvalue, code normalizerretty>
+  : MarshallingInfo<keypath, defaultvalue> {
+  code NormalizerRetTy = normalizerretty;
+}
+
+class MarshallingInfoFlag<code keypath, DefaultAnyOf defaults = DefaultAnyOf<[]>, code ty="unsigned">
+  : MarshallingInfo<keypath, defaults.DefaultValue> {
+  code NormalizerRetTy = ty;
+  code Normalizer = "normalizeSimpleFlag";
+}
+
+class MarshallingInfoBitfieldFlag<code keypath, code value>
+  : MarshallingInfoFlag<keypath, DefaultAnyOf<[], "0u", " | ">, "unsigned"> {
+  code Normalizer = "(normalizeFlagToValue<unsigned, "#value#">)";
+  code ValueMerger = "mergeMaskValue";
+  code ValueExtractor = "(extractMaskValue<unsigned, decltype("#value#"), "#value#">)";
+}
+
+// Mixins for additional marshalling attributes.
+
+class IsNegative {
+  // todo: create & apply a normalizer for negative flags
+}
+class AlwaysEmit { bit ShouldAlwaysEmit = true; }
+class Normalizer<code normalizer> { code Normalizer = normalizer; }
+class Denormalizer<code denormalizer> { code Denormalizer = denormalizer; }
+class NormalizedValuesScope<code scope> { code NormalizedValuesScope = scope; }
+class NormalizedValues<list<code> definitions> { list<code> NormalizedValues = definitions; } 
+class DenormalizeString { code Denormalizer = "denormalizeString"; }
+class AutoNormalizeEnum {
+  code Normalizer = "normalizeSimpleEnum";
+  code Denormalizer = "denormalizeSimpleEnum";
+}
+class ValueMerger<code merger> { code ValueMerger = merger; }
+class ValueExtractor<code extractor> { code ValueExtractor = extractor; }
 
 // Predefined options.
 

@@ -11,9 +11,14 @@
 
 include "mlir/Pass/PassBase.td"
 
-def GpuKernelOutlining : Pass<"gpu-kernel-outlining"> {
+def GpuKernelOutlining : Pass<"gpu-kernel-outlining", "ModuleOp"> {
   let summary = "Outline gpu.launch bodies to kernel functions";
   let constructor = "mlir::createGpuKernelOutliningPass()";
+}
+
+def GpuAsyncRegionPass : FunctionPass<"gpu-async-region"> {
+  let summary = "Make GPU ops async";
+  let constructor = "mlir::createGpuAsyncRegionPass()";
 }
 
 #endif // MLIR_DIALECT_GPU_PASSES

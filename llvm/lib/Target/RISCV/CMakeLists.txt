@@ -1,3 +1,5 @@
+add_llvm_component_group(RISCV)
+
 set(LLVM_TARGET_DEFINITIONS RISCV.td)
 
 tablegen(LLVM RISCVGenAsmMatcher.inc -gen-asm-matcher)
@@ -19,6 +21,7 @@ add_public_tablegen_target(RISCVCommonTableGen)
 add_llvm_target(RISCVCodeGen
   RISCVAsmPrinter.cpp
   RISCVCallLowering.cpp
+  RISCVExpandAtomicPseudoInsts.cpp
   RISCVExpandPseudoInsts.cpp
   RISCVFrameLowering.cpp
   RISCVInstrInfo.cpp
@@ -34,6 +37,23 @@ add_llvm_target(RISCVCodeGen
   RISCVTargetMachine.cpp
   RISCVTargetObjectFile.cpp
   RISCVTargetTransformInfo.cpp
+
+  LINK_COMPONENTS
+  Analysis
+  AsmPrinter
+  Core
+  CodeGen
+  MC
+  RISCVDesc
+  RISCVInfo
+  RISCVUtils
+  SelectionDAG
+  Support
+  Target
+  GlobalISel
+
+  ADD_TO_COMPONENT
+  RISCV
   )
 
 add_subdirectory(AsmParser)

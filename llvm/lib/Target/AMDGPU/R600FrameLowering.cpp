@@ -18,9 +18,9 @@ using namespace llvm;
 R600FrameLowering::~R600FrameLowering() = default;
 
 /// \returns The number of registers allocated for \p FI.
-int R600FrameLowering::getFrameIndexReference(const MachineFunction &MF,
-                                              int FI,
-                                              unsigned &FrameReg) const {
+StackOffset
+R600FrameLowering::getFrameIndexReference(const MachineFunction &MF, int FI,
+                                          Register &FrameReg) const {
   const MachineFrameInfo &MFI = MF.getFrameInfo();
   const R600RegisterInfo *RI
     = MF.getSubtarget<R600Subtarget>().getRegisterInfo();
@@ -45,5 +45,5 @@ int R600FrameLowering::getFrameIndexReference(const MachineFunction &MF,
   if (FI != -1)
     OffsetBytes = alignTo(OffsetBytes, MFI.getObjectAlign(FI));
 
-  return OffsetBytes / (getStackWidth(MF) * 4);
+  return StackOffset::getFixed(OffsetBytes / (getStackWidth(MF) * 4));
 }

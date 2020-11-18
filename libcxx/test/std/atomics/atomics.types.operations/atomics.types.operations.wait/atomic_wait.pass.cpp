@@ -7,9 +7,11 @@
 //===----------------------------------------------------------------------===//
 //
 // UNSUPPORTED: libcpp-has-no-threads
-// XFAIL: c++98, c++03
+// XFAIL: c++03
 
-// This test requires the dylib support introduced in D68480
+// This test requires the dylib support introduced in D68480,
+// which hasn't shipped yet.
+// XFAIL: with_system_cxx_lib=macosx
 // XFAIL: with_system_cxx_lib=macosx10.15
 // XFAIL: with_system_cxx_lib=macosx10.14
 // XFAIL: with_system_cxx_lib=macosx10.13

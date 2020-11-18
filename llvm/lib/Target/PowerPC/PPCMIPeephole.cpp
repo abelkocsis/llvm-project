@@ -57,6 +57,8 @@ STATISTIC(NumRotatesCollapsed,
           "Number of pairs of rotate left, clear left/right collapsed");
 STATISTIC(NumEXTSWAndSLDICombined,
           "Number of pairs of EXTSW and SLDI combined as EXTSWSLI");
+STATISTIC(NumLoadImmZeroFoldedAndRemoved,
+          "Number of LI(8) reg, 0 that are folded to r0 and removed");
 
 static cl::opt<bool>
 FixedPointRegToImm("ppc-reg-to-imm-fixed-point", cl::Hidden, cl::init(true),
@@ -124,9 +126,14 @@ public:
 
   // Main entry point for this pass.
   bool runOnMachineFunction(MachineFunction &MF) override {
+    initialize(MF);
+    // At this point, TOC pointer should not be used in a function that uses
+    // PC-Relative addressing.
+    assert((MF.getRegInfo().use_empty(PPC::X2) ||
+            !MF.getSubtarget<PPCSubtarget>().isUsingPCRelativeCalls()) &&
+           "TOC pointer used in a function using PC-Relative addressing!");
     if (skipFunction(MF.getFunction()))
       return false;
-    initialize(MF);
     return simplifyCode();
   }
 };
@@ -314,7 +321,22 @@ bool PPCMIPeephole::simplifyCode(void) {
 
       default:
         break;
-
+      case PPC::LI:
+      case PPC::LI8: {
+        // If we are materializing a zero, look for any use operands for which
+        // zero means immediate zero. All such operands can be replaced with
+        // PPC::ZERO.
+        if (!MI.getOperand(1).isImm() || MI.getOperand(1).getImm() != 0)
+          break;
+        unsigned MIDestReg = MI.getOperand(0).getReg();
+        for (MachineInstr& UseMI : MRI->use_instructions(MIDestReg))
+          Simplified |= TII->onlyFoldImmediate(UseMI, MI, MIDestReg);
+        if (MRI->use_nodbg_empty(MIDestReg)) {
+          ++NumLoadImmZeroFoldedAndRemoved;
+          ToErase = &MI;
+        }
+        break;
+      }
       case PPC::STD: {
         MachineFrameInfo &MFI = MF->getFrameInfo();
         if (MFI.hasVarSizedObjects() ||
@@ -826,147 +848,9 @@ bool PPCMIPeephole::simplifyCode(void) {
       case PPC::RLWINM_rec:
       case PPC::RLWINM8:
       case PPC::RLWINM8_rec: {
-        unsigned FoldingReg = MI.getOperand(1).getReg();
-        if (!Register::isVirtualRegister(FoldingReg))
-          break;
-
-        MachineInstr *SrcMI = MRI->getVRegDef(FoldingReg);
-        if (SrcMI->getOpcode() != PPC::RLWINM &&
-            SrcMI->getOpcode() != PPC::RLWINM_rec &&
-            SrcMI->getOpcode() != PPC::RLWINM8 &&
-            SrcMI->getOpcode() != PPC::RLWINM8_rec)
-          break;
-        assert((MI.getOperand(2).isImm() && MI.getOperand(3).isImm() &&
-                MI.getOperand(4).isImm() && SrcMI->getOperand(2).isImm() &&
-                SrcMI->getOperand(3).isImm() && SrcMI->getOperand(4).isImm()) &&
-               "Invalid PPC::RLWINM Instruction!");
-        uint64_t SHSrc = SrcMI->getOperand(2).getImm();
-        uint64_t SHMI = MI.getOperand(2).getImm();
-        uint64_t MBSrc = SrcMI->getOperand(3).getImm();
-        uint64_t MBMI = MI.getOperand(3).getImm();
-        uint64_t MESrc = SrcMI->getOperand(4).getImm();
-        uint64_t MEMI = MI.getOperand(4).getImm();
-
-        assert((MEMI < 32 && MESrc < 32 && MBMI < 32 && MBSrc < 32) &&
-               "Invalid PPC::RLWINM Instruction!");
-
-        // If MBMI is bigger than MEMI, we always can not get run of ones.
-        // RotatedSrcMask non-wrap:
-        //                 0........31|32........63
-        // RotatedSrcMask:   B---E        B---E
-        // MaskMI:         -----------|--E  B------
-        // Result:           -----          ---      (Bad candidate)
-        //
-        // RotatedSrcMask wrap:
-        //                 0........31|32........63
-        // RotatedSrcMask: --E   B----|--E    B----
-        // MaskMI:         -----------|--E  B------
-        // Result:         ---   -----|---    -----  (Bad candidate)
-        //
-        // One special case is RotatedSrcMask is a full set mask.
-        // RotatedSrcMask full:
-        //                 0........31|32........63
-        // RotatedSrcMask: ------EB---|-------EB---
-        // MaskMI:         -----------|--E  B------
-        // Result:         -----------|---  -------  (Good candidate)
-
-        // Mark special case.
-        bool SrcMaskFull = (MBSrc - MESrc == 1) || (MBSrc == 0 && MESrc == 31);
-
-        // For other MBMI > MEMI cases, just return.
-        if ((MBMI > MEMI) && !SrcMaskFull)
-          break;
-
-        // Handle MBMI <= MEMI cases.
-        APInt MaskMI = APInt::getBitsSetWithWrap(32, 32 - MEMI - 1, 32 - MBMI);
-        // In MI, we only need low 32 bits of SrcMI, just consider about low 32
-        // bit of SrcMI mask. Note that in APInt, lowerest bit is at index 0,
-        // while in PowerPC ISA, lowerest bit is at index 63.
-        APInt MaskSrc =
-            APInt::getBitsSetWithWrap(32, 32 - MESrc - 1, 32 - MBSrc);
-        // Current APInt::getBitsSetWithWrap sets all bits to 0 if loBit is
-        // equal to highBit.
-        // If MBSrc - MESrc == 1, we expect a full set mask instead of Null.
-        if (SrcMaskFull && (MBSrc - MESrc == 1))
-          MaskSrc.setAllBits();
-
-        APInt RotatedSrcMask = MaskSrc.rotl(SHMI);
-        APInt FinalMask = RotatedSrcMask & MaskMI;
-        uint32_t NewMB, NewME;
-
-        // If final mask is 0, MI result should be 0 too.
-        if (FinalMask.isNullValue()) {
-          bool Is64Bit = (MI.getOpcode() == PPC::RLWINM8 ||
-                          MI.getOpcode() == PPC::RLWINM8_rec);
-
-          Simplified = true;
-
-          LLVM_DEBUG(dbgs() << "Replace Instr: ");
-          LLVM_DEBUG(MI.dump());
-
-          if (MI.getOpcode() == PPC::RLWINM || MI.getOpcode() == PPC::RLWINM8) {
-            // Replace MI with "LI 0"
-            MI.RemoveOperand(4);
-            MI.RemoveOperand(3);
-            MI.RemoveOperand(2);
-            MI.getOperand(1).ChangeToImmediate(0);
-            MI.setDesc(TII->get(Is64Bit ? PPC::LI8 : PPC::LI));
-          } else {
-            // Replace MI with "ANDI_rec reg, 0"
-            MI.RemoveOperand(4);
-            MI.RemoveOperand(3);
-            MI.getOperand(2).setImm(0);
-            MI.setDesc(TII->get(Is64Bit ? PPC::ANDI8_rec : PPC::ANDI_rec));
-            MI.getOperand(1).setReg(SrcMI->getOperand(1).getReg());
-            if (SrcMI->getOperand(1).isKill()) {
-              MI.getOperand(1).setIsKill(true);
-              SrcMI->getOperand(1).setIsKill(false);
-            } else
-              // About to replace MI.getOperand(1), clear its kill flag.
-              MI.getOperand(1).setIsKill(false);
-          }
-
-          LLVM_DEBUG(dbgs() << "With: ");
-          LLVM_DEBUG(MI.dump());
-        } else if ((isRunOfOnes((unsigned)(FinalMask.getZExtValue()), NewMB,
-                               NewME) && NewMB <= NewME)|| SrcMaskFull) {
-          // Here we only handle MBMI <= MEMI case, so NewMB must be no bigger
-          // than NewME. Otherwise we get a 64 bit value after folding, but MI
-          // return a 32 bit value.
-
-          Simplified = true;
-          LLVM_DEBUG(dbgs() << "Converting Instr: ");
-          LLVM_DEBUG(MI.dump());
-
-          uint16_t NewSH = (SHSrc + SHMI) % 32;
-          MI.getOperand(2).setImm(NewSH);
-          // If SrcMI mask is full, no need to update MBMI and MEMI.
-          if (!SrcMaskFull) {
-            MI.getOperand(3).setImm(NewMB);
-            MI.getOperand(4).setImm(NewME);
-          }
-          MI.getOperand(1).setReg(SrcMI->getOperand(1).getReg());
-          if (SrcMI->getOperand(1).isKill()) {
-            MI.getOperand(1).setIsKill(true);
-            SrcMI->getOperand(1).setIsKill(false);
-          } else
-            // About to replace MI.getOperand(1), clear its kill flag.
-            MI.getOperand(1).setIsKill(false);
-
-          LLVM_DEBUG(dbgs() << "To: ");
-          LLVM_DEBUG(MI.dump());
-        }
-        if (Simplified) {
-          // If FoldingReg has no non-debug use and it has no implicit def (it
-          // is not RLWINMO or RLWINM8o), it's safe to delete its def SrcMI.
-          // Otherwise keep it.
+        Simplified = TII->combineRLWINM(MI, &ToErase);
+        if (Simplified)
           ++NumRotatesCollapsed;
-          if (MRI->use_nodbg_empty(FoldingReg) && !SrcMI->hasImplicitDef()) {
-            ToErase = SrcMI;
-            LLVM_DEBUG(dbgs() << "Delete dead instruction: ");
-            LLVM_DEBUG(SrcMI->dump());
-          }
-        }
         break;
       }
       }
@@ -1538,10 +1422,18 @@ bool PPCMIPeephole::emitRLDICWhenLoweringJumpTables(MachineInstr &MI) {
   MI.getOperand(1).setReg(SrcMI->getOperand(1).getReg());
   MI.getOperand(2).setImm(NewSH);
   MI.getOperand(3).setImm(NewMB);
+  MI.getOperand(1).setIsKill(SrcMI->getOperand(1).isKill());
+  SrcMI->getOperand(1).setIsKill(false);
 
   LLVM_DEBUG(dbgs() << "To: ");
   LLVM_DEBUG(MI.dump());
   NumRotatesCollapsed++;
+  // If SrcReg has no non-debug use it's safe to delete its def SrcMI.
+  if (MRI->use_nodbg_empty(SrcReg)) {
+    assert(!SrcMI->hasImplicitDef() &&
+           "Not expecting an implicit def with this instr.");
+    SrcMI->eraseFromParent();
+  }
   return true;
 }
 

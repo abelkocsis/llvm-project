@@ -7,11 +7,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Dialect/LLVMIR/Transforms/LegalizeForExport.h"
+#include "PassDetail.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/IR/Block.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/Module.h"
-#include "mlir/Pass/Pass.h"
 
 using namespace mlir;
 
@@ -50,18 +50,15 @@ static void ensureDistinctSuccessors(Block &bb) {
 
 void mlir::LLVM::ensureDistinctSuccessors(Operation *op) {
   op->walk([](LLVMFuncOp f) {
-    for (auto &bb : f.getBlocks()) {
+    for (auto &bb : f) {
       ::ensureDistinctSuccessors(bb);
     }
   });
 }
 
 namespace {
-struct LegalizeForExportPass : public OperationPass<LegalizeForExportPass> {
-/// Include the generated pass utilities.
-#define GEN_PASS_LLVMLegalizeForExport
-#include "mlir/Dialect/LLVMIR/Transforms/Passes.h.inc"
-
+struct LegalizeForExportPass
+    : public LLVMLegalizeForExportBase<LegalizeForExportPass> {
   void runOnOperation() override {
     LLVM::ensureDistinctSuccessors(getOperation());
   }

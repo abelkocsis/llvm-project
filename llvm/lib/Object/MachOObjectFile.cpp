@@ -1596,6 +1596,9 @@ MachOObjectFile::MachOObjectFile(MemoryBufferRef Object, bool IsLittleEndian,
        if ((Err = checkTwoLevelHintsCommand(*this, Load, I,
                                             &TwoLevelHintsLoadCmd, Elements)))
          return;
+    } else if (Load.C.cmd == MachO::LC_IDENT) {
+      // Note: LC_IDENT is ignored.
+      continue;
     } else if (isLoadCommandObsolete(Load.C.cmd)) {
       Err = malformedError("load command " + Twine(I) + " for cmd value of: " +
                            Twine(Load.C.cmd) + " is obsolete and not "
@@ -1804,8 +1807,8 @@ Expected<uint64_t> MachOObjectFile::getSymbolAddress(DataRefImpl Sym) const {
 }
 
 uint32_t MachOObjectFile::getSymbolAlignment(DataRefImpl DRI) const {
-  uint32_t flags = getSymbolFlags(DRI);
-  if (flags & SymbolRef::SF_Common) {
+  uint32_t Flags = cantFail(getSymbolFlags(DRI));
+  if (Flags & SymbolRef::SF_Common) {
     MachO::nlist_base Entry = getSymbolTableEntryBase(*this, DRI);
     return 1 << MachO::GET_COMM_ALIGN(Entry.n_desc);
   }
@@ -1840,7 +1843,7 @@ MachOObjectFile::getSymbolType(DataRefImpl Symb) const {
   return SymbolRef::ST_Other;
 }
 
-uint32_t MachOObjectFile::getSymbolFlags(DataRefImpl DRI) const {
+Expected<uint32_t> MachOObjectFile::getSymbolFlags(DataRefImpl DRI) const {
   MachO::nlist_base Entry = getSymbolTableEntryBase(*this, DRI);
 
   uint8_t MachOType = Entry.n_type;
@@ -2032,7 +2035,9 @@ bool MachOObjectFile::isSectionBSS(DataRefImpl Sec) const {
 
 bool MachOObjectFile::isDebugSection(StringRef SectionName) const {
   return SectionName.startswith("__debug") ||
-         SectionName.startswith("__zdebug") || SectionName == "__gdb_index";
+         SectionName.startswith("__zdebug") ||
+         SectionName.startswith("__apple") || SectionName == "__gdb_index" ||
+         SectionName == "__swift_ast";
 }
 
 unsigned MachOObjectFile::getSectionID(SectionRef Sec) const {

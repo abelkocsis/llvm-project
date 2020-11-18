@@ -21,6 +21,8 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/IntrinsicsARM.h"
 #include <array>
 #include <cstdint>
 
@@ -152,9 +154,10 @@ public:
   bool isPredicated(const MachineInstr &MI) const override;
 
   // MIR printer helper function to annotate Operands with a comment.
-  std::string createMIROperandComment(const MachineInstr &MI,
-                                      const MachineOperand &Op,
-                                      unsigned OpIdx) const override;
+  std::string
+  createMIROperandComment(const MachineInstr &MI, const MachineOperand &Op,
+                          unsigned OpIdx,
+                          const TargetRegisterInfo *TRI) const override;
 
   ARMCC::CondCodes getPredicate(const MachineInstr &MI) const {
     int PIdx = MI.findFirstPredOperandIdx();
@@ -168,28 +171,13 @@ public:
   bool SubsumesPredicate(ArrayRef<MachineOperand> Pred1,
                          ArrayRef<MachineOperand> Pred2) const override;
 
-  bool DefinesPredicate(MachineInstr &MI,
-                        std::vector<MachineOperand> &Pred) const override;
+  bool ClobbersPredicate(MachineInstr &MI, std::vector<MachineOperand> &Pred,
+                         bool SkipDead) const override;
 
   bool isPredicable(const MachineInstr &MI) const override;
 
   // CPSR defined in instruction
   static bool isCPSRDefined(const MachineInstr &MI);
-  bool isAddrMode3OpImm(const MachineInstr &MI, unsigned Op) const;
-  bool isAddrMode3OpMinusReg(const MachineInstr &MI, unsigned Op) const;
-
-  // Load, scaled register offset
-  bool isLdstScaledReg(const MachineInstr &MI, unsigned Op) const;
-  // Load, scaled register offset, not plus LSL2
-  bool isLdstScaledRegNotPlusLsl2(const MachineInstr &MI, unsigned Op) const;
-  // Minus reg for ldstso addr mode
-  bool isLdstSoMinusReg(const MachineInstr &MI, unsigned Op) const;
-  // Scaled register offset in address mode 2
-  bool isAm2ScaledReg(const MachineInstr &MI, unsigned Op) const;
-  // Load multiple, base reg in list
-  bool isLDMBaseRegInList(const MachineInstr &MI) const;
-  // get LDM variable defs size
-  unsigned getLDMVariableDefsSize(const MachineInstr &MI) const;
 
   /// GetInstSize - Returns the size of the specified MachineInstr.
   ///
@@ -353,7 +341,61 @@ public:
   ArrayRef<std::pair<unsigned, const char *>>
   getSerializableBitmaskMachineOperandTargetFlags() const override;
 
+  /// ARM supports the MachineOutliner.
+  bool isFunctionSafeToOutlineFrom(MachineFunction &MF,
+                                   bool OutlineFromLinkOnceODRs) const override;
+  outliner::OutlinedFunction getOutliningCandidateInfo(
+      std::vector<outliner::Candidate> &RepeatedSequenceLocs) const override;
+  outliner::InstrType getOutliningType(MachineBasicBlock::iterator &MIT,
+                                       unsigned Flags) const override;
+  bool isMBBSafeToOutlineFrom(MachineBasicBlock &MBB,
+                              unsigned &Flags) const override;
+  void buildOutlinedFrame(MachineBasicBlock &MBB, MachineFunction &MF,
+                          const outliner::OutlinedFunction &OF) const override;
+  MachineBasicBlock::iterator
+  insertOutlinedCall(Module &M, MachineBasicBlock &MBB,
+                     MachineBasicBlock::iterator &It, MachineFunction &MF,
+                     const outliner::Candidate &C) const override;
+
+  /// Enable outlining by default at -Oz.
+  bool shouldOutlineFromFunctionByDefault(MachineFunction &MF) const override;
+
 private:
+  /// Returns an unused general-purpose register which can be used for
+  /// constructing an outlined call if one exists. Returns 0 otherwise.
+  unsigned findRegisterToSaveLRTo(const outliner::Candidate &C) const;
+
+  // Adds an instruction which saves the link register on top of the stack into
+  /// the MachineBasicBlock \p MBB at position \p It.
+  void saveLROnStack(MachineBasicBlock &MBB,
+                     MachineBasicBlock::iterator It) const;
+
+  /// Adds an instruction which restores the link register from the top the
+  /// stack into the MachineBasicBlock \p MBB at position \p It.
+  void restoreLRFromStack(MachineBasicBlock &MBB,
+                          MachineBasicBlock::iterator It) const;
+
+  /// Emit CFI instructions into the MachineBasicBlock \p MBB at position \p It,
+  /// for the case when the LR is saved on the stack.
+  void emitCFIForLRSaveOnStack(MachineBasicBlock &MBB,
+                               MachineBasicBlock::iterator It) const;
+
+  /// Emit CFI instructions into the MachineBasicBlock \p MBB at position \p It,
+  /// for the case when the LR is saved in the register \p Reg.
+  void emitCFIForLRSaveToReg(MachineBasicBlock &MBB,
+                             MachineBasicBlock::iterator It,
+                             Register Reg) const;
+
+  /// Emit CFI instructions into the MachineBasicBlock \p MBB at position \p It,
+  /// after the LR is was restored from the stack.
+  void emitCFIForLRRestoreFromStack(MachineBasicBlock &MBB,
+                                    MachineBasicBlock::iterator It) const;
+
+  /// Emit CFI instructions into the MachineBasicBlock \p MBB at position \p It,
+  /// after the LR is was restored from a register.
+  void emitCFIForLRRestoreFromReg(MachineBasicBlock &MBB,
+                                  MachineBasicBlock::iterator It) const;
+
   unsigned getInstBundleLength(const MachineInstr &MI) const;
 
   int getVLDMDefCycle(const InstrItineraryData *ItinData,
@@ -413,8 +455,11 @@ private:
 
   /// Identify instructions that can be folded into a MOVCC instruction, and
   /// return the defining instruction.
-  MachineInstr *canFoldIntoMOVCC(unsigned Reg, const MachineRegisterInfo &MRI,
+  MachineInstr *canFoldIntoMOVCC(Register Reg, const MachineRegisterInfo &MRI,
                                  const TargetInstrInfo *TII) const;
+
+  bool isReallyTriviallyReMaterializable(const MachineInstr &MI,
+                                         AAResults *AA) const override;
 
 private:
   /// Modeling special VFP / NEON fp MLA / MLS hazards.
@@ -501,25 +546,6 @@ bool isUncondBranchOpcode(int Opc) {
 // This table shows the VPT instruction variants, i.e. the different
 // mask field encodings, see also B5.6. Predication/conditional execution in
 // the ArmARM.
-
-
-inline static ARM::PredBlockMask getARMVPTBlockMask(unsigned NumInsts) {
-  switch (NumInsts) {
-  case 1:
-    return ARM::PredBlockMask::T;
-  case 2:
-    return ARM::PredBlockMask::TT;
-  case 3:
-    return ARM::PredBlockMask::TTT;
-  case 4:
-    return ARM::PredBlockMask::TTTT;
-  default:
-    break;
-  };
-  llvm_unreachable("Unexpected number of instruction in a VPT block");
-}
-
-
 static inline bool isVPTOpcode(int Opc) {
   return Opc == ARM::MVE_VPTv16i8 || Opc == ARM::MVE_VPTv16u8 ||
          Opc == ARM::MVE_VPTv16s8 || Opc == ARM::MVE_VPTv8i16 ||
@@ -618,8 +644,7 @@ static inline unsigned getTailPredVectorWidth(unsigned Opcode) {
   return 0;
 }
 
-static inline
-bool isVCTP(MachineInstr *MI) {
+static inline bool isVCTP(const MachineInstr *MI) {
   switch (MI->getOpcode()) {
   default:
     break;
@@ -635,6 +660,7 @@ bool isVCTP(MachineInstr *MI) {
 static inline
 bool isLoopStart(MachineInstr &MI) {
   return MI.getOpcode() == ARM::t2DoLoopStart ||
+         MI.getOpcode() == ARM::t2DoLoopStartTP ||
          MI.getOpcode() == ARM::t2WhileLoopStart;
 }
 
@@ -675,21 +701,21 @@ static inline bool isSubImmOpcode(int Opc) {
 static inline bool isMovRegOpcode(int Opc) {
   return Opc == ARM::MOVr || Opc == ARM::tMOVr || Opc == ARM::t2MOVr;
 }
-
 /// isValidCoprocessorNumber - decide whether an explicit coprocessor
 /// number is legal in generic instructions like CDP. The answer can
 /// vary with the subtarget.
 static inline bool isValidCoprocessorNumber(unsigned Num,
                                             const FeatureBitset& featureBits) {
+  // In Armv7 and Armv8-M CP10 and CP11 clash with VFP/NEON, however, the
+  // coprocessor is still valid for CDP/MCR/MRC and friends. Allowing it is
+  // useful for code which is shared with older architectures which do not know
+  // the new VFP/NEON mnemonics.
+
   // Armv8-A disallows everything *other* than 111x (CP14 and CP15).
   if (featureBits[ARM::HasV8Ops] && (Num & 0xE) != 0xE)
     return false;
 
-  // Armv7 disallows 101x (CP10 and CP11), which clash with VFP/NEON.
-  if (featureBits[ARM::HasV7Ops] && (Num & 0xE) == 0xA)
-    return false;
-
-  // Armv8.1-M also disallows 100x (CP8,CP9) and 111x (CP14,CP15)
+  // Armv8.1-M disallows 100x (CP8,CP9) and 111x (CP14,CP15)
   // which clash with MVE.
   if (featureBits[ARM::HasV8_1MMainlineOps] &&
       ((Num & 0xE) == 0x8 || (Num & 0xE) == 0xE))
@@ -701,7 +727,7 @@ static inline bool isValidCoprocessorNumber(unsigned Num,
 /// getInstrPredicate - If instruction is predicated, returns its predicate
 /// condition, otherwise returns AL. It also returns the condition code
 /// register by reference.
-ARMCC::CondCodes getInstrPredicate(const MachineInstr &MI, unsigned &PredReg);
+ARMCC::CondCodes getInstrPredicate(const MachineInstr &MI, Register &PredReg);
 
 unsigned getMatchingCondBranchOpcode(unsigned Opc);
 
@@ -715,21 +741,21 @@ unsigned convertAddSubFlagsOpcode(unsigned OldOpc);
 /// code.
 void emitARMRegPlusImmediate(MachineBasicBlock &MBB,
                              MachineBasicBlock::iterator &MBBI,
-                             const DebugLoc &dl, unsigned DestReg,
-                             unsigned BaseReg, int NumBytes,
-                             ARMCC::CondCodes Pred, unsigned PredReg,
+                             const DebugLoc &dl, Register DestReg,
+                             Register BaseReg, int NumBytes,
+                             ARMCC::CondCodes Pred, Register PredReg,
                              const ARMBaseInstrInfo &TII, unsigned MIFlags = 0);
 
 void emitT2RegPlusImmediate(MachineBasicBlock &MBB,
                             MachineBasicBlock::iterator &MBBI,
-                            const DebugLoc &dl, unsigned DestReg,
-                            unsigned BaseReg, int NumBytes,
-                            ARMCC::CondCodes Pred, unsigned PredReg,
+                            const DebugLoc &dl, Register DestReg,
+                            Register BaseReg, int NumBytes,
+                            ARMCC::CondCodes Pred, Register PredReg,
                             const ARMBaseInstrInfo &TII, unsigned MIFlags = 0);
 void emitThumbRegPlusImmediate(MachineBasicBlock &MBB,
                                MachineBasicBlock::iterator &MBBI,
-                               const DebugLoc &dl, unsigned DestReg,
-                               unsigned BaseReg, int NumBytes,
+                               const DebugLoc &dl, Register DestReg,
+                               Register BaseReg, int NumBytes,
                                const TargetInstrInfo &TII,
                                const ARMBaseRegisterInfo &MRI,
                                unsigned MIFlags = 0);
@@ -748,11 +774,11 @@ bool tryFoldSPUpdateIntoPushPop(const ARMSubtarget &Subtarget,
 /// offset could not be handled directly in MI, and return the left-over
 /// portion by reference.
 bool rewriteARMFrameIndex(MachineInstr &MI, unsigned FrameRegIdx,
-                          unsigned FrameReg, int &Offset,
+                          Register FrameReg, int &Offset,
                           const ARMBaseInstrInfo &TII);
 
 bool rewriteT2FrameIndex(MachineInstr &MI, unsigned FrameRegIdx,
-                         unsigned FrameReg, int &Offset,
+                         Register FrameReg, int &Offset,
                          const ARMBaseInstrInfo &TII,
                          const TargetRegisterInfo *TRI);
 
@@ -767,7 +793,7 @@ MachineInstr *findCMPToFoldIntoCBZ(MachineInstr *Br,
                                    const TargetRegisterInfo *TRI);
 
 void addUnpredicatedMveVpredNOp(MachineInstrBuilder &MIB);
-void addUnpredicatedMveVpredROp(MachineInstrBuilder &MIB, unsigned DestReg);
+void addUnpredicatedMveVpredROp(MachineInstrBuilder &MIB, Register DestReg);
 
 void addPredicatedMveVpredNOp(MachineInstrBuilder &MIB, unsigned Cond);
 void addPredicatedMveVpredROp(MachineInstrBuilder &MIB, unsigned Cond,
@@ -786,6 +812,88 @@ unsigned ConstantMaterializationCost(unsigned Val,
 bool HasLowerConstantMaterializationCost(unsigned Val1, unsigned Val2,
                                          const ARMSubtarget *Subtarget,
                                          bool ForCodesize = false);
+
+// Return the immediate if this is ADDri or SUBri, scaled as appropriate.
+// Returns 0 for unknown instructions.
+inline int getAddSubImmediate(MachineInstr &MI) {
+  int Scale = 1;
+  unsigned ImmOp;
+  switch (MI.getOpcode()) {
+  case ARM::t2ADDri:
+    ImmOp = 2;
+    break;
+  case ARM::t2SUBri:
+  case ARM::t2SUBri12:
+    ImmOp = 2;
+    Scale = -1;
+    break;
+  case ARM::tSUBi3:
+  case ARM::tSUBi8:
+    ImmOp = 3;
+    Scale = -1;
+    break;
+  default:
+    return 0;
+  }
+  return Scale * MI.getOperand(ImmOp).getImm();
+}
+
+// Given a memory access Opcode, check that the give Imm would be a valid Offset
+// for this instruction using its addressing mode.
+inline bool isLegalAddressImm(unsigned Opcode, int Imm,
+                              const TargetInstrInfo *TII) {
+  const MCInstrDesc &Desc = TII->get(Opcode);
+  unsigned AddrMode = (Desc.TSFlags & ARMII::AddrModeMask);
+  switch (AddrMode) {
+  case ARMII::AddrModeT2_i7:
+    return std::abs(Imm) < (((1 << 7) * 1) - 1);
+  case ARMII::AddrModeT2_i7s2:
+    return std::abs(Imm) < (((1 << 7) * 2) - 1) && Imm % 2 == 0;
+  case ARMII::AddrModeT2_i7s4:
+    return std::abs(Imm) < (((1 << 7) * 4) - 1) && Imm % 4 == 0;
+  case ARMII::AddrModeT2_i8:
+    return std::abs(Imm) < (((1 << 8) * 1) - 1);
+  case ARMII::AddrModeT2_i12:
+    return Imm >= 0 && Imm < (((1 << 12) * 1) - 1);
+  default:
+    llvm_unreachable("Unhandled Addressing mode");
+  }
+}
+
+// Return true if the given intrinsic is a gather
+inline bool isGather(IntrinsicInst *IntInst) {
+  if (IntInst == nullptr)
+    return false;
+  unsigned IntrinsicID = IntInst->getIntrinsicID();
+  return (IntrinsicID == Intrinsic::masked_gather ||
+          IntrinsicID == Intrinsic::arm_mve_vldr_gather_base ||
+          IntrinsicID == Intrinsic::arm_mve_vldr_gather_base_predicated ||
+          IntrinsicID == Intrinsic::arm_mve_vldr_gather_base_wb ||
+          IntrinsicID == Intrinsic::arm_mve_vldr_gather_base_wb_predicated ||
+          IntrinsicID == Intrinsic::arm_mve_vldr_gather_offset ||
+          IntrinsicID == Intrinsic::arm_mve_vldr_gather_offset_predicated);
+}
+
+// Return true if the given intrinsic is a scatter
+inline bool isScatter(IntrinsicInst *IntInst) {
+  if (IntInst == nullptr)
+    return false;
+  unsigned IntrinsicID = IntInst->getIntrinsicID();
+  return (IntrinsicID == Intrinsic::masked_scatter ||
+          IntrinsicID == Intrinsic::arm_mve_vstr_scatter_base ||
+          IntrinsicID == Intrinsic::arm_mve_vstr_scatter_base_predicated ||
+          IntrinsicID == Intrinsic::arm_mve_vstr_scatter_base_wb ||
+          IntrinsicID == Intrinsic::arm_mve_vstr_scatter_base_wb_predicated ||
+          IntrinsicID == Intrinsic::arm_mve_vstr_scatter_offset ||
+          IntrinsicID == Intrinsic::arm_mve_vstr_scatter_offset_predicated);
+}
+
+// Return true if the given intrinsic is a gather or scatter
+inline bool isGatherScatter(IntrinsicInst *IntInst) {
+  if (IntInst == nullptr)
+    return false;
+  return isGather(IntInst) || isScatter(IntInst);
+}
 
 } // end namespace llvm
 

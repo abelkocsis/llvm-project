@@ -9,7 +9,6 @@
 #include "DwarfLinkerForBinary.h"
 #include "BinaryHolder.h"
 #include "DebugMap.h"
-#include "DwarfStreamer.h"
 #include "MachOUtils.h"
 #include "dsymutil.h"
 #include "llvm/ADT/ArrayRef.h"
@@ -84,6 +83,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
+#include "llvm/MC/MCTargetOptionsCommandFlags.h"
 #include <algorithm>
 #include <cassert>
 #include <cinttypes>
@@ -101,6 +101,9 @@
 #include <vector>
 
 namespace llvm {
+
+static mc::RegisterMCTargetOptionsFlags MOF;
+
 namespace dsymutil {
 
 static Error copySwiftInterfaces(
@@ -163,7 +166,14 @@ bool DwarfLinkerForBinary::createStreamer(const Triple &TheTriple,
   if (Options.NoOutput)
     return true;
 
-  Streamer = std::make_unique<DwarfStreamer>(OutFile, Options);
+  Streamer = std::make_unique<DwarfStreamer>(
+      Options.FileType, OutFile, Options.Translator, Options.Minimize,
+      [&](const Twine &Error, StringRef Context, const DWARFDie *) {
+        error(Error, Context);
+      },
+      [&](const Twine &Warning, StringRef Context, const DWARFDie *) {
+        warn(Warning, Context);
+      });
   return Streamer->init(TheTriple);
 }
 
@@ -252,7 +262,7 @@ static Error emitRemarks(const LinkOptions &Options, StringRef BinaryPath,
   return Error::success();
 }
 
-ErrorOr<DwarfFile &>
+ErrorOr<DWARFFile &>
 DwarfLinkerForBinary::loadObject(const DebugMapObject &Obj,
                                  const DebugMap &DebugMap,
                                  remarks::RemarkLinker &RL) {
@@ -264,7 +274,7 @@ DwarfLinkerForBinary::loadObject(const DebugMapObject &Obj,
     AddressMapForLinking.push_back(
         std::make_unique<AddressManager>(*this, *ErrorOrObj, Obj));
 
-    ObjectsForLinking.push_back(std::make_unique<DwarfFile>(
+    ObjectsForLinking.push_back(std::make_unique<DWARFFile>(
         Obj.getObjectFilename(), ContextForLinking.back().get(),
         AddressMapForLinking.back().get(),
         Obj.empty() ? Obj.getWarnings() : EmptyWarnings));
@@ -305,6 +315,7 @@ bool DwarfLinkerForBinary::link(const DebugMap &Map) {
   };
 
   GeneralLinker.setVerbosity(Options.Verbose);
+  GeneralLinker.setStatistics(Options.Statistics);
   GeneralLinker.setNoOutput(Options.NoOutput);
   GeneralLinker.setNoODR(Options.NoODR);
   GeneralLinker.setUpdate(Options.Update);
@@ -318,12 +329,12 @@ bool DwarfLinkerForBinary::link(const DebugMap &Map) {
         reportWarning(Warning, Context, DIE);
       });
   GeneralLinker.setErrorHandler(
-      [&](const Twine &Error, StringRef Context, const DWARFDie *DIE) {
+      [&](const Twine &Error, StringRef Context, const DWARFDie *) {
         error(Error, Context);
       });
   GeneralLinker.setObjFileLoader(
       [&DebugMap, &RL, this](StringRef ContainerName,
-                             StringRef Path) -> ErrorOr<DwarfFile &> {
+                             StringRef Path) -> ErrorOr<DWARFFile &> {
         auto &Obj = DebugMap.addDebugMapObject(
             Path, sys::TimePoint<std::chrono::seconds>(), MachO::N_OSO);
 
@@ -418,7 +429,7 @@ bool DwarfLinkerForBinary::link(const DebugMap &Map) {
     if (auto ErrorOrObj = loadObject(*Obj, Map, RL))
       GeneralLinker.addObjectFile(*ErrorOrObj);
     else {
-      ObjectsForLinking.push_back(std::make_unique<DwarfFile>(
+      ObjectsForLinking.push_back(std::make_unique<DWARFFile>(
           Obj->getObjectFilename(), nullptr, nullptr,
           Obj->empty() ? Obj->getWarnings() : EmptyWarnings));
       GeneralLinker.addObjectFile(*ObjectsForLinking.back());
@@ -442,7 +453,14 @@ bool DwarfLinkerForBinary::link(const DebugMap &Map) {
       return error(toString(std::move(E)));
   }
 
-  return Streamer->finish(Map, Options.Translator);
+  if (Map.getTriple().isOSDarwin() && !Map.getBinaryPath().empty() &&
+      Options.FileType == OutputFileType::Object)
+    return MachOUtils::generateDsymCompanion(
+        Options.VFS, Map, Options.Translator,
+        *Streamer->getAsmPrinter().OutStreamer, OutFile);
+
+  Streamer->finish();
+  return true;
 }
 
 static bool isMachOPairedReloc(uint64_t RelocType, uint64_t Arch) {

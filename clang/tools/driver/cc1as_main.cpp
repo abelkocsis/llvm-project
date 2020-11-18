@@ -221,19 +221,13 @@ bool AssemblerInvocation::CreateFromArgs(AssemblerInvocation &Opts,
   // Any DebugInfoKind implies GenDwarfForAssembly.
   Opts.GenDwarfForAssembly = Args.hasArg(OPT_debug_info_kind_EQ);
 
-  if (const Arg *A = Args.getLastArg(OPT_compress_debug_sections,
-                                     OPT_compress_debug_sections_EQ)) {
-    if (A->getOption().getID() == OPT_compress_debug_sections) {
-      // TODO: be more clever about the compression type auto-detection
-      Opts.CompressDebugSections = llvm::DebugCompressionType::GNU;
-    } else {
-      Opts.CompressDebugSections =
-          llvm::StringSwitch<llvm::DebugCompressionType>(A->getValue())
-              .Case("none", llvm::DebugCompressionType::None)
-              .Case("zlib", llvm::DebugCompressionType::Z)
-              .Case("zlib-gnu", llvm::DebugCompressionType::GNU)
-              .Default(llvm::DebugCompressionType::None);
-    }
+  if (const Arg *A = Args.getLastArg(OPT_compress_debug_sections_EQ)) {
+    Opts.CompressDebugSections =
+        llvm::StringSwitch<llvm::DebugCompressionType>(A->getValue())
+            .Case("none", llvm::DebugCompressionType::None)
+            .Case("zlib", llvm::DebugCompressionType::Z)
+            .Case("zlib-gnu", llvm::DebugCompressionType::GNU)
+            .Default(llvm::DebugCompressionType::None);
   }
 
   Opts.RelaxELFRelocations = Args.hasArg(OPT_mrelax_relocations);
@@ -429,12 +423,7 @@ static bool ExecuteAssembler(AssemblerInvocation &Opts,
                             SrcMgr.getMemoryBuffer(BufferIndex)->getBuffer());
 
   // Build up the feature string from the target feature list.
-  std::string FS;
-  if (!Opts.Features.empty()) {
-    FS = Opts.Features[0];
-    for (unsigned i = 1, e = Opts.Features.size(); i != e; ++i)
-      FS += "," + Opts.Features[i];
-  }
+  std::string FS = llvm::join(Opts.Features, ",");
 
   std::unique_ptr<MCStreamer> Str;
 
@@ -531,8 +520,8 @@ static bool ExecuteAssembler(AssemblerInvocation &Opts,
     Failed = Parser->Run(Opts.NoInitialTextSection);
   }
 
-  // Close Streamer first.
-  // It might have a reference to the output stream.
+  // Parser has a reference to the output stream (Str), so close Parser first.
+  Parser.reset();
   Str.reset();
   // Close the output stream early.
   BOS.reset();

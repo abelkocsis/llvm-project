@@ -23,6 +23,7 @@
 #include "clang/Sema/Sema.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/Support/Casting.h"
@@ -355,8 +356,7 @@ const char *CodeCompletionAllocator::CopyString(const Twine &String) {
 }
 
 StringRef CodeCompletionTUInfo::getParentName(const DeclContext *DC) {
-  const NamedDecl *ND = dyn_cast<NamedDecl>(DC);
-  if (!ND)
+  if (!isa<NamedDecl>(DC))
     return {};
 
   // Check whether we've already cached the parent name.
@@ -469,8 +469,7 @@ void CodeCompletionBuilder::addParentContext(const DeclContext *DC) {
   if (DC->isFunctionOrMethod())
     return;
 
-  const NamedDecl *ND = dyn_cast<NamedDecl>(DC);
-  if (!ND)
+  if (!isa<NamedDecl>(DC))
     return;
 
   ParentName = getCodeCompletionTUInfo().getParentName(DC);

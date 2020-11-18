@@ -37,8 +37,6 @@
 
 namespace llvm {
 
-class raw_ostream;
-
 const std::error_category &sampleprof_category();
 
 enum class sampleprof_error {
@@ -169,6 +167,13 @@ enum class SecNameTableFlags : uint32_t {
   SecFlagInValid = 0,
   SecFlagMD5Name = (1 << 0)
 };
+enum class SecProfSummaryFlags : uint32_t {
+  SecFlagInValid = 0,
+  /// SecFlagPartial means the profile is for common/shared code.
+  /// The common profile is usually merged from profiles collected
+  /// from running other targets.
+  SecFlagPartial = (1 << 0)
+};
 
 // Verify section specific flag is used for the correct section.
 template <class SecFlagType>
@@ -182,6 +187,9 @@ static inline void verifySecFlag(SecType Type, SecFlagType Flag) {
   switch (Type) {
   case SecNameTable:
     IsFlagLegal = std::is_same<SecNameTableFlags, SecFlagType>();
+    break;
+  case SecProfSummary:
+    IsFlagLegal = std::is_same<SecProfSummaryFlags, SecFlagType>();
     break;
   default:
     break;
@@ -332,6 +340,7 @@ private:
 raw_ostream &operator<<(raw_ostream &OS, const SampleRecord &Sample);
 
 class FunctionSamples;
+class SampleProfileReaderItaniumRemapper;
 
 using BodySampleMap = std::map<LineLocation, SampleRecord>;
 // NOTE: Using a StringMap here makes parsed profiles consume around 17% more
@@ -418,35 +427,15 @@ public:
     return &iter->second;
   }
 
-  /// Returns a pointer to FunctionSamples at the given callsite location \p Loc
-  /// with callee \p CalleeName. If no callsite can be found, relax the
-  /// restriction to return the FunctionSamples at callsite location \p Loc
-  /// with the maximum total sample count.
-  const FunctionSamples *findFunctionSamplesAt(const LineLocation &Loc,
-                                               StringRef CalleeName) const {
-    std::string CalleeGUID;
-    CalleeName = getRepInFormat(CalleeName, UseMD5, CalleeGUID);
-
-    auto iter = CallsiteSamples.find(Loc);
-    if (iter == CallsiteSamples.end())
-      return nullptr;
-    auto FS = iter->second.find(CalleeName);
-    if (FS != iter->second.end())
-      return &FS->second;
-    // If we cannot find exact match of the callee name, return the FS with
-    // the max total count. Only do this when CalleeName is not provided, 
-    // i.e., only for indirect calls.
-    if (!CalleeName.empty()) 
-      return nullptr;
-    uint64_t MaxTotalSamples = 0;
-    const FunctionSamples *R = nullptr;
-    for (const auto &NameFS : iter->second)
-      if (NameFS.second.getTotalSamples() >= MaxTotalSamples) {
-        MaxTotalSamples = NameFS.second.getTotalSamples();
-        R = &NameFS.second;
-      }
-    return R;
-  }
+  /// Returns a pointer to FunctionSamples at the given callsite location
+  /// \p Loc with callee \p CalleeName. If no callsite can be found, relax
+  /// the restriction to return the FunctionSamples at callsite location
+  /// \p Loc with the maximum total sample count. If \p Remapper is not
+  /// nullptr, use \p Remapper to find FunctionSamples with equivalent name
+  /// as \p CalleeName.
+  const FunctionSamples *
+  findFunctionSamplesAt(const LineLocation &Loc, StringRef CalleeName,
+                        SampleProfileReaderItaniumRemapper *Remapper) const;
 
   bool empty() const { return TotalSamples == 0; }
 
@@ -488,11 +477,25 @@ public:
     return CallsiteSamples;
   }
 
+  /// Return the maximum of sample counts in a function body including functions
+  /// inlined in it.
+  uint64_t getMaxCountInside() const {
+    uint64_t MaxCount = 0;
+    for (const auto &L : getBodySamples())
+      MaxCount = std::max(MaxCount, L.second.getSamples());
+    for (const auto &C : getCallsiteSamples())
+      for (const FunctionSamplesMap::value_type &F : C.second)
+        MaxCount = std::max(MaxCount, F.second.getMaxCountInside());
+    return MaxCount;
+  }
+
   /// Merge the samples in \p Other into this one.
   /// Optionally scale samples by \p Weight.
   sampleprof_error merge(const FunctionSamples &Other, uint64_t Weight = 1) {
     sampleprof_error Result = sampleprof_error::success;
     Name = Other.getName();
+    if (!GUIDToFuncNameMap)
+      GUIDToFuncNameMap = Other.GUIDToFuncNameMap;
     MergeResult(Result, addTotalSamples(Other.getTotalSamples(), Weight));
     MergeResult(Result, addHeadSamples(Other.getHeadSamples(), Weight));
     for (const auto &I : Other.getBodySamples()) {
@@ -517,15 +520,20 @@ public:
                             uint64_t Threshold) const {
     if (TotalSamples <= Threshold)
       return;
-    S.insert(getGUID(Name));
+    auto isDeclaration = [](const Function *F) {
+      return !F || F->isDeclaration();
+    };
+    if (isDeclaration(M->getFunction(getFuncName()))) {
+      // Add to the import list only when it's defined out of module.
+      S.insert(getGUID(Name));
+    }
     // Import hot CallTargets, which may not be available in IR because full
     // profile annotation cannot be done until backend compilation in ThinLTO.
     for (const auto &BS : BodySamples)
       for (const auto &TS : BS.second.getCallTargets())
         if (TS.getValue() > Threshold) {
-          const Function *Callee =
-              M->getFunction(getNameInModule(TS.getKey(), M));
-          if (!Callee || !Callee->getSubprogram())
+          const Function *Callee = M->getFunction(getFuncName(TS.getKey()));
+          if (isDeclaration(Callee))
             S.insert(getGUID(TS.getKey()));
         }
     for (const auto &CS : CallsiteSamples)
@@ -539,10 +547,8 @@ public:
   /// Return the function name.
   StringRef getName() const { return Name; }
 
-  /// Return the original function name if it exists in Module \p M.
-  StringRef getFuncNameInModule(const Module *M) const {
-    return getNameInModule(Name, M);
-  }
+  /// Return the original function name.
+  StringRef getFuncName() const { return getFuncName(Name); }
 
   /// Return the canonical name for a function, taking into account
   /// suffix elision policy attributes.
@@ -572,13 +578,14 @@ public:
     return F.getName();
   }
 
-  /// Translate \p Name into its original name in Module.
+  /// Translate \p Name into its original name.
   /// When profile doesn't use MD5, \p Name needs no translation.
   /// When profile uses MD5, \p Name in current FunctionSamples
-  /// is actually GUID of the original function name. getNameInModule will
-  /// translate \p Name in current FunctionSamples into its original name.
-  /// If the original name doesn't exist in \p M, return empty StringRef.
-  StringRef getNameInModule(StringRef Name, const Module *M) const {
+  /// is actually GUID of the original function name. getFuncName will
+  /// translate \p Name in current FunctionSamples into its original name
+  /// by looking up in the function map GUIDToFuncNameMap.
+  /// If the original name doesn't exist in the map, return empty StringRef.
+  StringRef getFuncName(StringRef Name) const {
     if (!UseMD5)
       return Name;
 
@@ -602,7 +609,11 @@ public:
   /// tree nodes in the profile.
   ///
   /// \returns the FunctionSamples pointer to the inlined instance.
-  const FunctionSamples *findFunctionSamples(const DILocation *DIL) const;
+  /// If \p Remapper is not nullptr, it will be used to find matching
+  /// FunctionSamples with not exactly the same but equivalent name.
+  const FunctionSamples *findFunctionSamples(
+      const DILocation *DIL,
+      SampleProfileReaderItaniumRemapper *Remapper = nullptr) const;
 
   static SampleProfileFormat Format;
 
@@ -619,6 +630,10 @@ public:
   static uint64_t getGUID(StringRef Name) {
     return UseMD5 ? std::stoull(Name.data()) : Function::getGUID(Name);
   }
+
+  // Find all the names in the current FunctionSamples including names in
+  // all the inline instances and names of call targets.
+  void findAllNames(DenseSet<StringRef> &NameSet) const;
 
 private:
   /// Mangled name of the function.

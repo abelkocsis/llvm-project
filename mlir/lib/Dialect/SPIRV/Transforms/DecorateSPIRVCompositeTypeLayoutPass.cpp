@@ -13,6 +13,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "PassDetail.h"
 #include "mlir/Dialect/SPIRV/LayoutUtils.h"
 #include "mlir/Dialect/SPIRV/Passes.h"
 #include "mlir/Dialect/SPIRV/SPIRVDialect.h"
@@ -29,14 +30,15 @@ public:
 
   LogicalResult matchAndRewrite(spirv::GlobalVariableOp op,
                                 PatternRewriter &rewriter) const override {
-    spirv::StructType::LayoutInfo structSize = 0;
-    VulkanLayoutUtils::Size structAlignment = 1;
     SmallVector<NamedAttribute, 4> globalVarAttrs;
 
     auto ptrType = op.type().cast<spirv::PointerType>();
     auto structType = VulkanLayoutUtils::decorateType(
-        ptrType.getPointeeType().cast<spirv::StructType>(), structSize,
-        structAlignment);
+        ptrType.getPointeeType().cast<spirv::StructType>());
+
+    if (!structType)
+      return failure();
+
     auto decoratedType =
         spirv::PointerType::get(structType, ptrType.getStorageClass());
 
@@ -80,14 +82,14 @@ static void populateSPIRVLayoutInfoPatterns(OwningRewritePatternList &patterns,
 
 namespace {
 class DecorateSPIRVCompositeTypeLayoutPass
-    : public ModulePass<DecorateSPIRVCompositeTypeLayoutPass> {
-private:
-  void runOnModule() override;
+    : public SPIRVCompositeTypeLayoutBase<
+          DecorateSPIRVCompositeTypeLayoutPass> {
+  void runOnOperation() override;
 };
 } // namespace
 
-void DecorateSPIRVCompositeTypeLayoutPass::runOnModule() {
-  auto module = getModule();
+void DecorateSPIRVCompositeTypeLayoutPass::runOnOperation() {
+  auto module = getOperation();
   OwningRewritePatternList patterns;
   populateSPIRVLayoutInfoPatterns(patterns, module.getContext());
   ConversionTarget target(*(module.getContext()));
@@ -105,15 +107,13 @@ void DecorateSPIRVCompositeTypeLayoutPass::runOnModule() {
 
   // TODO: Change the type for the indirect users such as spv.Load, spv.Store,
   // spv.FunctionCall and so on.
-
-  for (auto spirvModule : module.getOps<spirv::ModuleOp>()) {
-    if (failed(applyFullConversion(spirvModule, target, patterns))) {
+  FrozenRewritePatternList frozenPatterns(std::move(patterns));
+  for (auto spirvModule : module.getOps<spirv::ModuleOp>())
+    if (failed(applyFullConversion(spirvModule, target, frozenPatterns)))
       signalPassFailure();
-    }
-  }
 }
 
-std::unique_ptr<OpPassBase<ModuleOp>>
+std::unique_ptr<OperationPass<ModuleOp>>
 mlir::spirv::createDecorateSPIRVCompositeTypeLayoutPass() {
   return std::make_unique<DecorateSPIRVCompositeTypeLayoutPass>();
 }

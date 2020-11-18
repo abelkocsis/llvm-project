@@ -82,6 +82,9 @@ public:
   /// Return the command line argument of the pass.
   StringRef getArgument() const;
 
+  /// Return the name for the C++ base class.
+  StringRef getBaseClass() const;
+
   /// Return the short 1-line summary of the pass.
   StringRef getSummary() const;
 
@@ -90,6 +93,9 @@ public:
 
   /// Return the C++ constructor call to create an instance of this pass.
   StringRef getConstructor() const;
+
+  /// Return the dialects this pass needs to be registered.
+  ArrayRef<StringRef> getDependentDialects() const;
 
   /// Return the options provided by this pass.
   ArrayRef<PassOption> getOptions() const;
@@ -101,6 +107,7 @@ public:
 
 private:
   const llvm::Record *def;
+  std::vector<StringRef> dependentDialects;
   std::vector<PassOption> options;
   std::vector<PassStatistic> statistics;
 };

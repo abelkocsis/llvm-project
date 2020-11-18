@@ -9,15 +9,6 @@ endif ()
 
 string(REPLACE ${CMAKE_CFG_INTDIR} ${LLVM_BUILD_MODE} CLANG_TOOLS_DIR ${LLVM_RUNTIME_OUTPUT_INTDIR})
 
-if(CLANG_BUILT_STANDALONE)
-  # Set HAVE_LIBZ according to recorded LLVM_ENABLE_ZLIB value. This
-  # value is forced to 0 if zlib was not found, so it is fine to use it
-  # instead of HAVE_LIBZ (not recorded).
-  if(LLVM_ENABLE_ZLIB)
-    set(HAVE_LIBZ 1)
-  endif()
-endif()
-
 llvm_canonicalize_cmake_booleans(
   CLANG_BUILD_EXAMPLES
   CLANG_ENABLE_ARCMT
@@ -25,7 +16,7 @@ llvm_canonicalize_cmake_booleans(
   CLANG_SPAWN_CC1
   ENABLE_BACKTRACES
   ENABLE_EXPERIMENTAL_NEW_PASS_MANAGER
-  HAVE_LIBZ
+  LLVM_ENABLE_ZLIB
   LLVM_ENABLE_PER_TARGET_RUNTIME_DIR
   LLVM_ENABLE_PLUGINS
   LLVM_ENABLE_THREADS)
@@ -67,6 +58,7 @@ if(CLANG_TEST_USE_VG)
 endif ()
 
 list(APPEND CLANG_TEST_DEPS
+  apinotes-test
   c-index-test
   clang
   clang-resource-headers
@@ -106,15 +98,8 @@ if (CLANG_BUILD_EXAMPLES)
 endif ()
 
 set(CLANG_TEST_PARAMS
-  clang_site_config=${CMAKE_CURRENT_BINARY_DIR}/lit.site.cfg
   USE_Z3_SOLVER=0
   )
-
-set(ANALYZER_TEST_PARAMS
-  USE_Z3_SOLVER=0)
-
-set(ANALYZER_TEST_PARAMS_Z3
-  USE_Z3_SOLVER=1)
 
 if( NOT CLANG_BUILT_STANDALONE )
   list(APPEND CLANG_TEST_DEPS

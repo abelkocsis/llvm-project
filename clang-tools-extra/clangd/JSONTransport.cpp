@@ -5,12 +5,14 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-#include "Logger.h"
 #include "Protocol.h" // For LSPError
-#include "Shutdown.h"
 #include "Transport.h"
+#include "support/Cancellation.h"
+#include "support/Logger.h"
+#include "support/Shutdown.h"
 #include "llvm/Support/Errno.h"
 #include "llvm/Support/Error.h"
+#include <system_error>
 
 namespace clang {
 namespace clangd {
@@ -22,7 +24,21 @@ llvm::json::Object encodeError(llvm::Error E) {
   // FIXME: encode cancellation errors using RequestCancelled or ContentModified
   // as appropriate.
   if (llvm::Error Unhandled = llvm::handleErrors(
-          std::move(E), [&](const LSPError &L) -> llvm::Error {
+          std::move(E),
+          [&](const CancelledError &C) -> llvm::Error {
+            switch (C.Reason) {
+            case static_cast<int>(ErrorCode::ContentModified):
+              Code = ErrorCode::ContentModified;
+              Message = "Request cancelled because the document was modified";
+              break;
+            default:
+              Code = ErrorCode::RequestCancelled;
+              Message = "Request cancelled";
+              break;
+            }
+            return llvm::Error::success();
+          },
+          [&](const LSPError &L) -> llvm::Error {
             Message = L.Message;
             Code = L.Code;
             return llvm::Error::success();
@@ -36,12 +52,10 @@ llvm::json::Object encodeError(llvm::Error E) {
 }
 
 llvm::Error decodeError(const llvm::json::Object &O) {
-  std::string Msg =
-      std::string(O.getString("message").getValueOr("Unspecified error"));
+  llvm::StringRef Msg = O.getString("message").getValueOr("Unspecified error");
   if (auto Code = O.getInteger("code"))
-    return llvm::make_error<LSPError>(std::move(Msg), ErrorCode(*Code));
-  return llvm::make_error<llvm::StringError>(std::move(Msg),
-                                             llvm::inconvertibleErrorCode());
+    return llvm::make_error<LSPError>(Msg.str(), ErrorCode(*Code));
+  return error(Msg.str());
 }
 
 class JSONTransport : public Transport {
@@ -87,9 +101,8 @@ public:
   llvm::Error loop(MessageHandler &Handler) override {
     while (!feof(In)) {
       if (shutdownRequested())
-        return llvm::createStringError(
-            std::make_error_code(std::errc::operation_canceled),
-            "Got signal, shutting down");
+        return error(std::make_error_code(std::errc::operation_canceled),
+                     "Got signal, shutting down");
       if (ferror(In))
         return llvm::errorCodeToError(
             std::error_code(errno, std::system_category()));

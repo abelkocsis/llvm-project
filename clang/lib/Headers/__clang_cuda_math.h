@@ -12,7 +12,7 @@
 #error "This file is for CUDA compilation only."
 #endif
 
-#ifndef _OPENMP
+#ifndef __OPENMP_NVPTX__
 #if CUDA_VERSION < 9000
 #error This file is intended to be used with CUDA-9+ only.
 #endif
@@ -22,10 +22,24 @@
 // we implement in this file. We need static in order to avoid emitting unused
 // functions and __forceinline__ helps inlining these wrappers at -O1.
 #pragma push_macro("__DEVICE__")
-#ifdef _OPENMP
-#define __DEVICE__ static __inline__ __attribute__((always_inline))
+#ifdef __OPENMP_NVPTX__
+#if defined(__cplusplus)
+#define __DEVICE__ static constexpr __attribute__((always_inline, nothrow))
+#else
+#define __DEVICE__ static __attribute__((always_inline, nothrow))
+#endif
 #else
 #define __DEVICE__ static __device__ __forceinline__
+#endif
+
+// Specialized version of __DEVICE__ for functions with void return type. Needed
+// because the OpenMP overlay requires constexpr functions here but prior to
+// c++14 void return functions could not be constexpr.
+#pragma push_macro("__DEVICE_VOID__")
+#ifdef __OPENMP_NVPTX__ && defined(__cplusplus) && __cplusplus < 201402L
+#define __DEVICE_VOID__ static __attribute__((always_inline, nothrow))
+#else
+#define __DEVICE_VOID__ __DEVICE__
 #endif
 
 // libdevice provides fast low precision and slow full-recision implementations
@@ -39,17 +53,8 @@
 #define __FAST_OR_SLOW(fast, slow) slow
 #endif
 
-// For C++ 17 we need to include noexcept attribute to be compatible
-// with the header-defined version. This may be removed once
-// variant is supported.
-#if defined(_OPENMP) && defined(__cplusplus) && __cplusplus >= 201703L
-#define __NOEXCEPT noexcept
-#else
-#define __NOEXCEPT
-#endif
-
-__DEVICE__ int abs(int __a) __NOEXCEPT { return __nv_abs(__a); }
-__DEVICE__ double fabs(double __a) __NOEXCEPT { return __nv_fabs(__a); }
+__DEVICE__ int abs(int __a) { return __nv_abs(__a); }
+__DEVICE__ double fabs(double __a) { return __nv_fabs(__a); }
 __DEVICE__ double acos(double __a) { return __nv_acos(__a); }
 __DEVICE__ float acosf(float __a) { return __nv_acosf(__a); }
 __DEVICE__ double acosh(double __a) { return __nv_acosh(__a); }
@@ -104,7 +109,7 @@ __DEVICE__ float exp2f(float __a) { return __nv_exp2f(__a); }
 __DEVICE__ float expf(float __a) { return __nv_expf(__a); }
 __DEVICE__ double expm1(double __a) { return __nv_expm1(__a); }
 __DEVICE__ float expm1f(float __a) { return __nv_expm1f(__a); }
-__DEVICE__ float fabsf(float __a) __NOEXCEPT { return __nv_fabsf(__a); }
+__DEVICE__ float fabsf(float __a) { return __nv_fabsf(__a); }
 __DEVICE__ double fdim(double __a, double __b) { return __nv_fdim(__a, __b); }
 __DEVICE__ float fdimf(float __a, float __b) { return __nv_fdimf(__a, __b); }
 __DEVICE__ double fdivide(double __a, double __b) { return __a / __b; }
@@ -142,15 +147,15 @@ __DEVICE__ float j1f(float __a) { return __nv_j1f(__a); }
 __DEVICE__ double jn(int __n, double __a) { return __nv_jn(__n, __a); }
 __DEVICE__ float jnf(int __n, float __a) { return __nv_jnf(__n, __a); }
 #if defined(__LP64__) || defined(_WIN64)
-__DEVICE__ long labs(long __a) __NOEXCEPT { return __nv_llabs(__a); };
+__DEVICE__ long labs(long __a) { return __nv_llabs(__a); };
 #else
-__DEVICE__ long labs(long __a) __NOEXCEPT { return __nv_abs(__a); };
+__DEVICE__ long labs(long __a) { return __nv_abs(__a); };
 #endif
 __DEVICE__ double ldexp(double __a, int __b) { return __nv_ldexp(__a, __b); }
 __DEVICE__ float ldexpf(float __a, int __b) { return __nv_ldexpf(__a, __b); }
 __DEVICE__ double lgamma(double __a) { return __nv_lgamma(__a); }
 __DEVICE__ float lgammaf(float __a) { return __nv_lgammaf(__a); }
-__DEVICE__ long long llabs(long long __a) __NOEXCEPT { return __nv_llabs(__a); }
+__DEVICE__ long long llabs(long long __a) { return __nv_llabs(__a); }
 __DEVICE__ long long llmax(long long __a, long long __b) {
   return __nv_llmax(__a, __b);
 }
@@ -190,8 +195,8 @@ __DEVICE__ int max(int __a, int __b) { return __nv_max(__a, __b); }
 __DEVICE__ int min(int __a, int __b) { return __nv_min(__a, __b); }
 __DEVICE__ double modf(double __a, double *__b) { return __nv_modf(__a, __b); }
 __DEVICE__ float modff(float __a, float *__b) { return __nv_modff(__a, __b); }
-__DEVICE__ double nearbyint(double __a) { return __nv_nearbyint(__a); }
-__DEVICE__ float nearbyintf(float __a) { return __nv_nearbyintf(__a); }
+__DEVICE__ double nearbyint(double __a) { return __builtin_nearbyint(__a); }
+__DEVICE__ float nearbyintf(float __a) { return __builtin_nearbyintf(__a); }
 __DEVICE__ double nextafter(double __a, double __b) {
   return __nv_nextafter(__a, __b);
 }
@@ -244,8 +249,9 @@ __DEVICE__ double rhypot(double __a, double __b) {
 __DEVICE__ float rhypotf(float __a, float __b) {
   return __nv_rhypotf(__a, __b);
 }
-__DEVICE__ double rint(double __a) { return __nv_rint(__a); }
-__DEVICE__ float rintf(float __a) { return __nv_rintf(__a); }
+// __nv_rint* in libdevice is buggy and produces incorrect results.
+__DEVICE__ double rint(double __a) { return __builtin_rint(__a); }
+__DEVICE__ float rintf(float __a) { return __builtin_rintf(__a); }
 __DEVICE__ double rnorm(int __a, const double *__b) {
   return __nv_rnorm(__a, __b);
 }
@@ -270,8 +276,6 @@ __DEVICE__ double rsqrt(double __a) { return __nv_rsqrt(__a); }
 __DEVICE__ float rsqrtf(float __a) { return __nv_rsqrtf(__a); }
 __DEVICE__ double scalbn(double __a, int __b) { return __nv_scalbn(__a, __b); }
 __DEVICE__ float scalbnf(float __a, int __b) { return __nv_scalbnf(__a, __b); }
-// TODO: remove once variant is supported
-#ifndef _OPENMP
 __DEVICE__ double scalbln(double __a, long __b) {
   if (__b > INT_MAX)
     return __a > 0 ? HUGE_VAL : -HUGE_VAL;
@@ -286,18 +290,17 @@ __DEVICE__ float scalblnf(float __a, long __b) {
     return __a > 0 ? 0.f : -0.f;
   return scalbnf(__a, (int)__b);
 }
-#endif
 __DEVICE__ double sin(double __a) { return __nv_sin(__a); }
-__DEVICE__ void sincos(double __a, double *__s, double *__c) {
+__DEVICE_VOID__ void sincos(double __a, double *__s, double *__c) {
   return __nv_sincos(__a, __s, __c);
 }
-__DEVICE__ void sincosf(float __a, float *__s, float *__c) {
+__DEVICE_VOID__ void sincosf(float __a, float *__s, float *__c) {
   return __FAST_OR_SLOW(__nv_fast_sincosf, __nv_sincosf)(__a, __s, __c);
 }
-__DEVICE__ void sincospi(double __a, double *__s, double *__c) {
+__DEVICE_VOID__ void sincospi(double __a, double *__s, double *__c) {
   return __nv_sincospi(__a, __s, __c);
 }
-__DEVICE__ void sincospif(float __a, float *__s, float *__c) {
+__DEVICE_VOID__ void sincospif(float __a, float *__s, float *__c) {
   return __nv_sincospif(__a, __s, __c);
 }
 __DEVICE__ float sinf(float __a) {
@@ -339,7 +342,7 @@ __DEVICE__ double yn(int __a, double __b) { return __nv_yn(__a, __b); }
 __DEVICE__ float ynf(int __a, float __b) { return __nv_ynf(__a, __b); }
 
 #pragma pop_macro("__DEVICE__")
+#pragma pop_macro("__DEVICE_VOID__")
 #pragma pop_macro("__FAST_OR_SLOW")
-#undef __NOEXCEPT
 
 #endif // __CLANG_CUDA_DEVICE_FUNCTIONS_H__

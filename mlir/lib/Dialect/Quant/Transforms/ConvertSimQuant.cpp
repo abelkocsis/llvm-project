@@ -6,25 +6,20 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "PassDetail.h"
 #include "mlir/Dialect/Quant/FakeQuantSupport.h"
 #include "mlir/Dialect/Quant/Passes.h"
 #include "mlir/Dialect/Quant/QuantOps.h"
 #include "mlir/Dialect/Quant/UniformSupport.h"
-#include "mlir/IR/Attributes.h"
-#include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/StandardTypes.h"
-#include "mlir/Pass/Pass.h"
+#include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
 using namespace mlir;
 using namespace mlir::quant;
 
 namespace {
 struct ConvertSimulatedQuantPass
-    : public FunctionPass<ConvertSimulatedQuantPass> {
-/// Include the generated pass utilities.
-#define GEN_PASS_QuantConvertSimulatedQuant
-#include "mlir/Dialect/Quant/Passes.h.inc"
-
+    : public QuantConvertSimulatedQuantBase<ConvertSimulatedQuantPass> {
   void runOnFunction() override;
 };
 
@@ -93,9 +88,9 @@ public:
   QuantizedType convertFakeQuantAttrsToType(ConstFakeQuant fqOp,
                                             Type expressedType) const {
     return fakeQuantAttrsToType(
-        fqOp.getLoc(), fqOp.num_bits().getSExtValue(),
-        fqOp.min().convertToFloat(), fqOp.max().convertToFloat(),
-        fqOp.narrow_range(), expressedType, fqOp.is_signed());
+        fqOp.getLoc(), fqOp.num_bits(), fqOp.min().convertToFloat(),
+        fqOp.max().convertToFloat(), fqOp.narrow_range(), expressedType,
+        fqOp.is_signed());
   }
 };
 
@@ -119,9 +114,8 @@ public:
     for (auto m : fqOp.max())
       max.push_back(m.cast<FloatAttr>().getValueAsDouble());
 
-    return fakeQuantAttrsToType(fqOp.getLoc(), fqOp.num_bits().getSExtValue(),
-                                fqOp.axis().getSExtValue(), min, max,
-                                fqOp.narrow_range(), expressedType,
+    return fakeQuantAttrsToType(fqOp.getLoc(), fqOp.num_bits(), fqOp.axis(),
+                                min, max, fqOp.narrow_range(), expressedType,
                                 fqOp.is_signed());
   }
 };
@@ -135,12 +129,12 @@ void ConvertSimulatedQuantPass::runOnFunction() {
   auto ctx = func.getContext();
   patterns.insert<ConstFakeQuantRewrite, ConstFakeQuantPerAxisRewrite>(
       ctx, &hadFailure);
-  applyPatternsGreedily(func, patterns);
+  applyPatternsAndFoldGreedily(func, std::move(patterns));
   if (hadFailure)
     signalPassFailure();
 }
 
-std::unique_ptr<OpPassBase<FuncOp>>
+std::unique_ptr<OperationPass<FuncOp>>
 mlir::quant::createConvertSimulatedQuantPass() {
   return std::make_unique<ConvertSimulatedQuantPass>();
 }

@@ -377,7 +377,7 @@ static void InitializeStandardPredefinedMacros(const TargetInfo &TI,
   } else {
     //   -- __cplusplus
     //      [C++20] The integer literal 202002L.
-    if (LangOpts.CPlusPlus2a)
+    if (LangOpts.CPlusPlus20)
       Builder.defineMacro("__cplusplus", "202002L");
     //      [C++17] The integer literal 201703L.
     else if (LangOpts.CPlusPlus17)
@@ -445,6 +445,9 @@ static void InitializeStandardPredefinedMacros(const TargetInfo &TI,
       case 200:
         Builder.defineMacro("__OPENCL_C_VERSION__", "200");
         break;
+      case 300:
+        Builder.defineMacro("__OPENCL_C_VERSION__", "300");
+        break;
       default:
         llvm_unreachable("Unsupported OpenCL version");
       }
@@ -453,6 +456,7 @@ static void InitializeStandardPredefinedMacros(const TargetInfo &TI,
     Builder.defineMacro("CL_VERSION_1_1", "110");
     Builder.defineMacro("CL_VERSION_1_2", "120");
     Builder.defineMacro("CL_VERSION_2_0", "200");
+    Builder.defineMacro("CL_VERSION_3_0", "300");
 
     if (TI.isLittleEndian())
       Builder.defineMacro("__ENDIAN_LITTLE__");
@@ -498,7 +502,7 @@ static void InitializeCPlusPlusFeatureTestMacros(const LangOptions &LangOpts,
     Builder.defineMacro("__cpp_user_defined_literals", "200809L");
     Builder.defineMacro("__cpp_lambdas", "200907L");
     Builder.defineMacro("__cpp_constexpr",
-                        LangOpts.CPlusPlus2a ? "201907L" :
+                        LangOpts.CPlusPlus20 ? "201907L" :
                         LangOpts.CPlusPlus17 ? "201603L" :
                         LangOpts.CPlusPlus14 ? "201304L" : "200704");
     Builder.defineMacro("__cpp_constexpr_in_decltype", "201711L");
@@ -525,9 +529,9 @@ static void InitializeCPlusPlusFeatureTestMacros(const LangOptions &LangOpts,
     Builder.defineMacro("__cpp_binary_literals", "201304L");
     Builder.defineMacro("__cpp_digit_separators", "201309L");
     Builder.defineMacro("__cpp_init_captures",
-                        LangOpts.CPlusPlus2a ? "201803L" : "201304L");
+                        LangOpts.CPlusPlus20 ? "201803L" : "201304L");
     Builder.defineMacro("__cpp_generic_lambdas",
-                        LangOpts.CPlusPlus2a ? "201707L" : "201304L");
+                        LangOpts.CPlusPlus20 ? "201707L" : "201304L");
     Builder.defineMacro("__cpp_decltype_auto", "201304L");
     Builder.defineMacro("__cpp_return_type_deduction", "201304L");
     Builder.defineMacro("__cpp_aggregate_nsdmi", "201304L");
@@ -563,7 +567,7 @@ static void InitializeCPlusPlusFeatureTestMacros(const LangOptions &LangOpts,
     Builder.defineMacro("__cpp_template_template_args", "201611L");
 
   // C++20 features.
-  if (LangOpts.CPlusPlus2a) {
+  if (LangOpts.CPlusPlus20) {
     //Builder.defineMacro("__cpp_aggregate_paren_init", "201902L");
     Builder.defineMacro("__cpp_concepts", "201907L");
     Builder.defineMacro("__cpp_conditional_explicit", "201806L");
@@ -1076,12 +1080,12 @@ static void InitializePredefinedMacros(const TargetInfo &TI,
     case 40:
       Builder.defineMacro("_OPENMP", "201307");
       break;
-    case 50:
-      Builder.defineMacro("_OPENMP", "201811");
+    case 45:
+      Builder.defineMacro("_OPENMP", "201511");
       break;
     default:
-      // Default version is OpenMP 4.5
-      Builder.defineMacro("_OPENMP", "201511");
+      // Default version is OpenMP 5.0
+      Builder.defineMacro("_OPENMP", "201811");
       break;
     }
   }

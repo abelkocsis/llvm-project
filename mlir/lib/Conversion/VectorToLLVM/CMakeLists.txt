@@ -6,17 +6,15 @@ add_mlir_conversion_library(MLIRVectorToLLVM
 
   DEPENDS
   MLIRConversionPassIncGen
-)
-set(LIBS
+  intrinsics_gen
+
+  LINK_COMPONENTS
+  Core
+
+  LINK_LIBS PUBLIC
   MLIRLLVMIR
   MLIRStandardToLLVM
-  MLIRVector
+  MLIRTargetLLVMIRModuleTranslation
   MLIRTransforms
-  LLVMCore
-  LLVMSupport
+  MLIRVector
   )
-
-add_dependencies(MLIRVectorToLLVM ${LIBS})
-target_link_libraries(MLIRVectorToLLVM
-  PUBLIC
-  ${LIBS})

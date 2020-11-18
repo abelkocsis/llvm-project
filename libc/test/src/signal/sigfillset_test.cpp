@@ -1,4 +1,4 @@
-//===-------------------- Unittests for sigfillset ------------------------===//
+//===-- Unittests for sigfillset ------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -12,7 +12,7 @@
 #include "src/signal/sigfillset.h"
 #include "src/signal/sigprocmask.h"
 
-#include "utils/UnitTest/ErrnoSetterMatcher.h"
+#include "test/ErrnoSetterMatcher.h"
 #include "utils/UnitTest/Test.h"
 
 TEST(Sigfillset, Invalid) {

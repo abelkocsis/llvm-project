@@ -16,16 +16,16 @@ include "mlir/Pass/PassBase.td"
 //===----------------------------------------------------------------------===//
 
 def ConvertAffineToStandard : Pass<"lower-affine"> {
-  let summary = "Lower Affine operations to a combination of Standard and Loop "
+  let summary = "Lower Affine operations to a combination of Standard and SCF "
                 "operations";
   let description = [{
 
-    Convert operations from the affine dialect into operations from the loop and
+    Convert operations from the affine dialect into operations from the SCF and
     standard dialects.
 
-    `affine.for` operations are converted to `loop.for` operations that are free
+    `affine.for` operations are converted to `scf.for` operations that are free
     of certain structural restrictions (on their bounds and step). `affine.if`
-    is similarly converted to the `loop.if` operation. `affine.apply` operations
+    is similarly converted to the `scf.if` operation. `affine.apply` operations
     are converted into sequences of primitive arithmetic operations from the
     standard dialect that have the same effect, using operands of the `index`
     type. Consequently, named maps and sets thare are no longer in use may be
@@ -66,52 +66,97 @@ def ConvertAffineToStandard : Pass<"lower-affine"> {
         `affine.apply`.
   }];
   let constructor = "mlir::createLowerAffinePass()";
+  let dependentDialects = [
+    "scf::SCFDialect",
+    "StandardOpsDialect",
+    "vector::VectorDialect"
+  ];
 }
 
 //===----------------------------------------------------------------------===//
 // AVX512ToLLVM
 //===----------------------------------------------------------------------===//
 
-def ConvertAVX512ToLLVM : Pass<"convert-avx512-to-llvm"> {
+def ConvertAVX512ToLLVM : Pass<"convert-avx512-to-llvm", "ModuleOp"> {
   let summary = "Convert the operations from the avx512 dialect into the LLVM "
                 "dialect";
   let constructor = "mlir::createConvertAVX512ToLLVMPass()";
+  let dependentDialects = ["LLVM::LLVMDialect", "LLVM::LLVMAVX512Dialect"];
 }
 
 //===----------------------------------------------------------------------===//
-// GPUToCUDA
+// AsyncToLLVM
 //===----------------------------------------------------------------------===//
 
-def ConvertGpuLaunchFuncToCudaCalls : Pass<"launch-func-to-cuda"> {
-  let summary = "Convert all launch_func ops to CUDA runtime calls";
-  let constructor = "mlir::createConvertGpuLaunchFuncToCudaCallsPass()";
+def ConvertAsyncToLLVM : Pass<"convert-async-to-llvm", "ModuleOp"> {
+  let summary = "Convert the operations from the async dialect into the LLVM "
+                "dialect";
+  let description = [{
+    Convert `async.execute` operations to LLVM coroutines and use async runtime
+    API to execute them.
+  }];
+  let constructor = "mlir::createConvertAsyncToLLVMPass()";
+  let dependentDialects = ["LLVM::LLVMDialect"];
+}
+
+//===----------------------------------------------------------------------===//
+// GPUCommon
+//===----------------------------------------------------------------------===//
+
+def GpuToLLVMConversionPass : Pass<"gpu-to-llvm", "ModuleOp"> {
+  let summary = "Convert GPU dialect to LLVM dialect with GPU runtime calls";
+  let constructor = "mlir::createGpuToLLVMConversionPass()";
+  let dependentDialects = ["LLVM::LLVMDialect"];
+  let options = [
+    Option<"gpuBinaryAnnotation", "gpu-binary-annotation", "std::string",
+           "", "Annotation attribute string for GPU binary">,
+  ];
+}
+
+def LowerHostCodeToLLVM : Pass<"lower-host-to-llvm", "ModuleOp"> {
+  let summary = "Lowers the host module code and `gpu.launch_func` to LLVM";
+  let constructor = "mlir::createLowerHostCodeToLLVMPass()";
+  let dependentDialects = ["LLVM::LLVMDialect"];
 }
 
 //===----------------------------------------------------------------------===//
 // GPUToNVVM
 //===----------------------------------------------------------------------===//
 
-def ConvertGpuOpsToNVVMOps : Pass<"convert-gpu-to-nvvm"> {
+def ConvertGpuOpsToNVVMOps : Pass<"convert-gpu-to-nvvm", "gpu::GPUModuleOp"> {
   let summary = "Generate NVVM operations for gpu operations";
   let constructor = "mlir::createLowerGpuOpsToNVVMOpsPass()";
+  let dependentDialects = ["NVVM::NVVMDialect"];
+  let options = [
+    Option<"indexBitwidth", "index-bitwidth", "unsigned",
+           /*default=kDeriveIndexBitwidthFromDataLayout*/"0",
+           "Bitwidth of the index type, 0 to use size of machine word">
+  ];
 }
 
 //===----------------------------------------------------------------------===//
 // GPUToROCDL
 //===----------------------------------------------------------------------===//
 
-def ConvertGpuOpsToROCDLOps : Pass<"convert-gpu-to-rocdl"> {
+def ConvertGpuOpsToROCDLOps : Pass<"convert-gpu-to-rocdl", "gpu::GPUModuleOp"> {
   let summary = "Generate ROCDL operations for gpu operations";
   let constructor = "mlir::createLowerGpuOpsToROCDLOpsPass()";
+  let dependentDialects = ["ROCDL::ROCDLDialect"];
+  let options = [
+    Option<"indexBitwidth", "index-bitwidth", "unsigned",
+           /*default=kDeriveIndexBitwidthFromDataLayout*/"0",
+           "Bitwidth of the index type, 0 to use size of machine word">
+  ];
 }
 
 //===----------------------------------------------------------------------===//
 // GPUToSPIRV
 //===----------------------------------------------------------------------===//
 
-def ConvertGPUToSPIRV : Pass<"convert-gpu-to-spirv"> {
+def ConvertGPUToSPIRV : Pass<"convert-gpu-to-spirv", "ModuleOp"> {
   let summary = "Convert GPU dialect to SPIR-V dialect";
   let constructor = "mlir::createConvertGPUToSPIRVPass()";
+  let dependentDialects = ["spirv::SPIRVDialect"];
 }
 
 //===----------------------------------------------------------------------===//
@@ -119,53 +164,91 @@ def ConvertGPUToSPIRV : Pass<"convert-gpu-to-spirv"> {
 //===----------------------------------------------------------------------===//
 
 def ConvertGpuLaunchFuncToVulkanLaunchFunc
-    : Pass<"convert-gpu-launch-to-vulkan-launch"> {
+    : Pass<"convert-gpu-launch-to-vulkan-launch", "ModuleOp"> {
   let summary = "Convert gpu.launch_func to vulkanLaunch external call";
   let constructor = "mlir::createConvertGpuLaunchFuncToVulkanLaunchFuncPass()";
+  let dependentDialects = ["spirv::SPIRVDialect"];
 }
 
-def ConvertVulkanLaunchFuncToVulkanCalls : Pass<"launch-func-to-vulkan"> {
+def ConvertVulkanLaunchFuncToVulkanCalls
+    : Pass<"launch-func-to-vulkan", "ModuleOp"> {
   let summary = "Convert vulkanLaunch external call to Vulkan runtime external "
                 "calls";
   let constructor = "mlir::createConvertVulkanLaunchFuncToVulkanCallsPass()";
+  let dependentDialects = ["LLVM::LLVMDialect"];
 }
 
 //===----------------------------------------------------------------------===//
 // LinalgToLLVM
 //===----------------------------------------------------------------------===//
 
-def ConvertLinalgToLLVM : Pass<"convert-linalg-to-llvm"> {
+def ConvertLinalgToLLVM : Pass<"convert-linalg-to-llvm", "ModuleOp"> {
   let summary = "Convert the operations from the linalg dialect into the LLVM "
                 "dialect";
   let constructor = "mlir::createConvertLinalgToLLVMPass()";
+  let dependentDialects = ["scf::SCFDialect", "LLVM::LLVMDialect"];
+}
+
+//===----------------------------------------------------------------------===//
+// LinalgToStandard
+//===----------------------------------------------------------------------===//
+
+def ConvertLinalgToStandard : Pass<"convert-linalg-to-std", "ModuleOp"> {
+  let summary = "Convert the operations from the linalg dialect into the "
+                "Standard dialect";
+  let constructor = "mlir::createConvertLinalgToStandardPass()";
+  let dependentDialects = ["StandardOpsDialect"];
 }
 
 //===----------------------------------------------------------------------===//
 // LinalgToSPIRV
 //===----------------------------------------------------------------------===//
 
-def ConvertLinalgToSPIRV : Pass<"convert-linalg-to-spirv"> {
+def ConvertLinalgToSPIRV : Pass<"convert-linalg-to-spirv", "ModuleOp"> {
   let summary = "Convert Linalg ops to SPIR-V ops";
   let constructor = "mlir::createLinalgToSPIRVPass()";
+  let dependentDialects = ["spirv::SPIRVDialect"];
 }
 
 //===----------------------------------------------------------------------===//
-// LoopToStandard
+// OpenMPToLLVM
 //===----------------------------------------------------------------------===//
 
-def ConvertLoopToStandard : Pass<"convert-loop-to-std"> {
-  let summary = "Convert Loop dialect to Standard dialect, replacing structured"
+def ConvertOpenMPToLLVM : Pass<"convert-openmp-to-llvm", "ModuleOp"> {
+  let summary = "Convert the OpenMP ops to OpenMP ops with LLVM dialect";
+  let constructor = "mlir::createConvertOpenMPToLLVMPass()";
+  let dependentDialects = ["LLVM::LLVMDialect"];
+}
+
+//===----------------------------------------------------------------------===//
+// PDLToPDLInterp
+//===----------------------------------------------------------------------===//
+
+def ConvertPDLToPDLInterp : Pass<"convert-pdl-to-pdl-interp", "ModuleOp"> {
+  let summary = "Convert PDL ops to PDL interpreter ops";
+  let constructor = "mlir::createPDLToPDLInterpPass()";
+  let dependentDialects = ["pdl_interp::PDLInterpDialect"];
+}
+
+//===----------------------------------------------------------------------===//
+// SCFToStandard
+//===----------------------------------------------------------------------===//
+
+def SCFToStandard : Pass<"convert-scf-to-std"> {
+  let summary = "Convert SCF dialect to Standard dialect, replacing structured"
                 " control flow with a CFG";
   let constructor = "mlir::createLowerToCFGPass()";
+  let dependentDialects = ["StandardOpsDialect"];
 }
 
 //===----------------------------------------------------------------------===//
-// LoopsToGPU
+// SCFToGPU
 //===----------------------------------------------------------------------===//
 
-def ConvertSimpleLoopsToGPU : Pass<"convert-loops-to-gpu"> {
-  let summary = "Convert top-level loops to GPU kernels";
-  let constructor = "mlir::createSimpleLoopsToGPUPass()";
+def ConvertAffineForToGPU : FunctionPass<"convert-affine-for-to-gpu"> {
+  let summary = "Convert top-level AffineFor Ops to GPU kernels";
+  let constructor = "mlir::createAffineForToGPUPass()";
+  let dependentDialects = ["gpu::GPUDialect"];
   let options = [
     Option<"numBlockDims", "gpu-block-dims", "unsigned", /*default=*/"1u",
            "Number of GPU block dimensions for mapping">,
@@ -174,29 +257,53 @@ def ConvertSimpleLoopsToGPU : Pass<"convert-loops-to-gpu"> {
   ];
 }
 
-def ConvertLoopsToGPU : Pass<"convert-loop-op-to-gpu"> {
-  let summary = "Convert top-level loop::ForOp to GPU kernels";
-  let constructor = "mlir::createLoopToGPUPass()";
-  let options = [
-    ListOption<"numWorkGroups", "gpu-num-workgroups", "int64_t",
-               "Num workgroups in the GPU launch",
-               "llvm::cl::ZeroOrMore, llvm::cl::MiscFlags::CommaSeparated">,
-    ListOption<"workGroupSize", "gpu-workgroup-size", "int64_t",
-               "Workgroup Size in the GPU launch",
-               "llvm::cl::ZeroOrMore, llvm::cl::MiscFlags::CommaSeparated">
-  ];
+def ConvertParallelLoopToGpu : Pass<"convert-parallel-loops-to-gpu"> {
+  let summary = "Convert mapped scf.parallel ops to gpu launch operations";
+  let constructor = "mlir::createParallelLoopToGpuPass()";
+  let dependentDialects = ["AffineDialect", "gpu::GPUDialect"];
 }
 
-def ConvertParallelLoopToGpu : Pass<"convert-parallel-loops-to-gpu"> {
-  let summary = "Convert mapped loop.parallel ops to gpu launch operations";
-  let constructor = "mlir::createParallelLoopToGpuPass()";
+//===----------------------------------------------------------------------===//
+// ShapeToStandard
+//===----------------------------------------------------------------------===//
+
+def ConvertShapeToStandard : Pass<"convert-shape-to-std", "ModuleOp"> {
+  let summary = "Convert operations from the shape dialect into the standard "
+                "dialect";
+  let constructor = "mlir::createConvertShapeToStandardPass()";
+  let dependentDialects = ["StandardOpsDialect", "scf::SCFDialect"];
+}
+
+def ConvertShapeConstraints: Pass<"convert-shape-constraints", "FuncOp"> {
+  let summary = "Convert shape constraint operations to the standard dialect";
+  let description = [{
+    This pass eliminates shape constraints from the program, converting them to
+    eager (side-effecting) error handling code.
+
+    This pass is separate from the regular convert-shape-to-standard, despite
+    converting between the same dialects, because converting shape constraints
+    can happen at a different part of the program than general shape
+    computation lowering.
+  }];
+  let constructor = "mlir::createConvertShapeConstraintsPass()";
+  let dependentDialects = ["StandardOpsDialect", "scf::SCFDialect"];
+}
+
+//===----------------------------------------------------------------------===//
+// SPIRVToLLVM
+//===----------------------------------------------------------------------===//
+
+def ConvertSPIRVToLLVM : Pass<"convert-spirv-to-llvm", "ModuleOp"> {
+  let summary = "Convert SPIR-V dialect to LLVM dialect";
+  let constructor = "mlir::createConvertSPIRVToLLVMPass()";
+  let dependentDialects = ["LLVM::LLVMDialect"];
 }
 
 //===----------------------------------------------------------------------===//
 // StandardToLLVM
 //===----------------------------------------------------------------------===//
 
-def ConvertStandardToLLVM : Pass<"convert-std-to-llvm"> {
+def ConvertStandardToLLVM : Pass<"convert-std-to-llvm", "ModuleOp"> {
   let summary = "Convert scalar and vector operations from the Standard to the "
                 "LLVM dialect";
   let description = [{
@@ -224,9 +331,10 @@ def ConvertStandardToLLVM : Pass<"convert-std-to-llvm"> {
     LLVM IR types.
   }];
   let constructor = "mlir::createLowerToLLVMPass()";
+  let dependentDialects = ["LLVM::LLVMDialect"];
   let options = [
-    Option<"useAlloca", "use-alloca", "bool", /*default=*/"false",
-           "Use `alloca` instead of `call @malloc` for converting std.alloc">,
+    Option<"useAlignedAlloc", "use-aligned-alloc", "bool", /*default=*/"false",
+           "Use aligned_alloc in place of malloc for heap allocations">,
     Option<"useBarePtrCallConv", "use-bare-ptr-memref-call-conv", "bool",
            /*default=*/"false",
            "Replace FuncOp's MemRef arguments with bare pointers to the MemRef "
@@ -235,8 +343,12 @@ def ConvertStandardToLLVM : Pass<"convert-std-to-llvm"> {
            "Emit wrappers for C-compatible pointer-to-struct memref "
            "descriptors">,
     Option<"indexBitwidth", "index-bitwidth", "unsigned",
-           /*default=*/"kDeriveIndexBitwidthFromDataLayout",
+           /*default=kDeriveIndexBitwidthFromDataLayout*/"0",
            "Bitwidth of the index type, 0 to use size of machine word">,
+    Option<"dataLayout", "data-layout", "std::string",
+           /*default=*/"\"\"",
+           "String description (LLVM format) of the data layout that is "
+           "expected on the produced module">
   ];
 }
 
@@ -247,21 +359,69 @@ def ConvertStandardToLLVM : Pass<"convert-std-to-llvm"> {
 def LegalizeStandardForSPIRV : Pass<"legalize-std-for-spirv"> {
   let summary = "Legalize standard ops for SPIR-V lowering";
   let constructor = "mlir::createLegalizeStdOpsForSPIRVLoweringPass()";
+  let dependentDialects = ["spirv::SPIRVDialect"];
 }
 
-def ConvertStandardToSPIRV : Pass<"convert-std-to-spirv"> {
+def ConvertStandardToSPIRV : Pass<"convert-std-to-spirv", "ModuleOp"> {
   let summary = "Convert Standard Ops to SPIR-V dialect";
   let constructor = "mlir::createConvertStandardToSPIRVPass()";
+  let dependentDialects = ["spirv::SPIRVDialect"];
+}
+
+//===----------------------------------------------------------------------===//
+// VectorToSCF
+//===----------------------------------------------------------------------===//
+
+def ConvertVectorToSCF : FunctionPass<"convert-vector-to-scf"> {
+  let summary = "Lower the operations from the vector dialect into the SCF "
+                "dialect";
+  let constructor = "mlir::createConvertVectorToSCFPass()";
+  let dependentDialects = ["AffineDialect", "scf::SCFDialect"];
+  let options = [
+    Option<"fullUnroll", "full-unroll", "bool", /*default=*/"false",
+           "Perform full unrolling when converting vector transfers to SCF">,
+  ];
 }
 
 //===----------------------------------------------------------------------===//
 // VectorToLLVM
 //===----------------------------------------------------------------------===//
 
-def ConvertVectorToLLVM : Pass<"convert-vector-to-llvm"> {
+def ConvertVectorToLLVM : Pass<"convert-vector-to-llvm", "ModuleOp"> {
   let summary = "Lower the operations from the vector dialect into the LLVM "
                 "dialect";
   let constructor = "mlir::createConvertVectorToLLVMPass()";
+  let dependentDialects = ["LLVM::LLVMDialect"];
+  let options = [
+    Option<"reassociateFPReductions", "reassociate-fp-reductions",
+           "bool", /*default=*/"false",
+           "Allows llvm to reassociate floating-point reductions for speed">,
+    Option<"enableIndexOptimizations", "enable-index-optimizations",
+           "bool", /*default=*/"true",
+           "Allows compiler to assume indices fit in 32-bit if that yields faster code">
+  ];
+}
+
+//===----------------------------------------------------------------------===//
+// VectorToROCDL
+//===----------------------------------------------------------------------===//
+
+def ConvertVectorToROCDL : Pass<"convert-vector-to-rocdl", "ModuleOp"> {
+  let summary = "Lower the operations from the vector dialect into the ROCDL "
+                "dialect";
+  let constructor = "mlir::createConvertVectorToROCDLPass()";
+  let dependentDialects = ["ROCDL::ROCDLDialect"];
+}
+
+//===----------------------------------------------------------------------===//
+// VectorToSPIRV
+//===----------------------------------------------------------------------===//
+
+def ConvertVectorToSPIRV : Pass<"convert-vector-to-spirv", "ModuleOp"> {
+  let summary = "Lower the operations from the vector dialect into the SPIR-V "
+                "dialect";
+  let constructor = "mlir::createConvertVectorToSPIRVPass()";
+  let dependentDialects = ["spirv::SPIRVDialect"];
 }
 
 #endif // MLIR_CONVERSION_PASSES

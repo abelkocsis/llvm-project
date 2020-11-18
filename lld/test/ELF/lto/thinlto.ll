@@ -42,7 +42,7 @@
 
 ; Test with many more threads than the system has
 ; RUN: rm -f %t31.lto.o %t32.lto.o
-; RUN: ld.lld -save-temps --thinlto-jobs=1000 -shared %t1.o %t2.o -o %t3
+; RUN: ld.lld -save-temps --thinlto-jobs=100 -shared %t1.o %t2.o -o %t3
 ; RUN: llvm-nm %t31.lto.o | FileCheck %s --check-prefix=NM1
 ; RUN: llvm-nm %t32.lto.o | FileCheck %s --check-prefix=NM2
 
@@ -62,7 +62,7 @@
 ; RUN: cp %t2.o %t.dir/t.o
 ; RUN: llvm-ar rcsT %t.dir/t.a %t.dir/t.o
 ; RUN: ld.lld -save-temps %t1.o %t.dir/t.a -o %t.null
-; RUN: ls '%t.dir/t.a(t.o at 0).0.preopt.bc'
+; RUN: ls %t.dir/t.a*.0.preopt.bc
 
 ; NM1: T f
 ; NM2: T g

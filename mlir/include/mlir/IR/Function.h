@@ -30,9 +30,12 @@ namespace mlir {
 /// implicitly capture global values, and all external references must use
 /// Function arguments or attributes that establish a symbolic connection(e.g.
 /// symbols referenced by name via a string attribute).
-class FuncOp : public Op<FuncOp, OpTrait::ZeroOperands, OpTrait::ZeroResult,
-                         OpTrait::IsIsolatedFromAbove, OpTrait::Symbol,
-                         OpTrait::FunctionLike, CallableOpInterface::Trait> {
+class FuncOp
+    : public Op<FuncOp, OpTrait::ZeroOperands, OpTrait::ZeroResult,
+                OpTrait::OneRegion, OpTrait::IsIsolatedFromAbove,
+                OpTrait::FunctionLike, OpTrait::AutomaticAllocationScope,
+                OpTrait::AffineScope, CallableOpInterface::Trait,
+                SymbolOpInterface::Trait> {
 public:
   using Op::Op;
   using Op::print;
@@ -45,24 +48,16 @@ public:
                        iterator_range<dialect_attr_iterator> attrs);
   static FuncOp create(Location location, StringRef name, FunctionType type,
                        ArrayRef<NamedAttribute> attrs,
-                       ArrayRef<NamedAttributeList> argAttrs);
+                       ArrayRef<MutableDictionaryAttr> argAttrs);
 
-  static void build(Builder *builder, OperationState &result, StringRef name,
-                    FunctionType type, ArrayRef<NamedAttribute> attrs);
-  static void build(Builder *builder, OperationState &result, StringRef name,
-                    FunctionType type, ArrayRef<NamedAttribute> attrs,
-                    ArrayRef<NamedAttributeList> argAttrs);
+  static void build(OpBuilder &builder, OperationState &result, StringRef name,
+                    FunctionType type, ArrayRef<NamedAttribute> attrs = {},
+                    ArrayRef<MutableDictionaryAttr> argAttrs = {});
 
   /// Operation hooks.
   static ParseResult parse(OpAsmParser &parser, OperationState &result);
   void print(OpAsmPrinter &p);
   LogicalResult verify();
-
-  /// Erase a single argument at `argIndex`.
-  void eraseArgument(unsigned argIndex) { eraseArguments({argIndex}); }
-  /// Erases the arguments listed in `argIndices`.
-  /// `argIndices` is allowed to have duplicates and can be in any order.
-  void eraseArguments(ArrayRef<unsigned> argIndices);
 
   /// Create a deep copy of this function and all of its blocks, remapping
   /// any operands that use values outside of the function using the map that is

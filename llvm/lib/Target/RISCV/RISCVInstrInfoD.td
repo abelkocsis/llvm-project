@@ -276,9 +276,13 @@ def : Pat<(fma FPR64:$rs1, FPR64:$rs2, (fneg FPR64:$rs3)),
 // fnmsub: -rs1 * rs2 + rs3
 def : Pat<(fma (fneg FPR64:$rs1), FPR64:$rs2, FPR64:$rs3),
           (FNMSUB_D FPR64:$rs1, FPR64:$rs2, FPR64:$rs3, 0b111)>;
+def : Pat<(fma FPR64:$rs1, (fneg FPR64:$rs2), FPR64:$rs3),
+          (FNMSUB_D FPR64:$rs1, FPR64:$rs2, FPR64:$rs3, 0b111)>;
 
 // fnmadd: -rs1 * rs2 - rs3
 def : Pat<(fma (fneg FPR64:$rs1), FPR64:$rs2, (fneg FPR64:$rs3)),
+          (FNMADD_D FPR64:$rs1, FPR64:$rs2, FPR64:$rs3, 0b111)>;
+def : Pat<(fma FPR64:$rs1, (fneg FPR64:$rs2), (fneg FPR64:$rs3)),
           (FNMADD_D FPR64:$rs1, FPR64:$rs2, FPR64:$rs3, 0b111)>;
 
 // The RISC-V 2.2 user-level ISA spec defines fmin and fmax as returning the
@@ -306,11 +310,15 @@ def : PatFpr64Fpr64<setole, FLE_D>;
 def : Pat<(seto FPR64:$rs1, FPR64:$rs2),
           (AND (FEQ_D FPR64:$rs1, FPR64:$rs1),
                (FEQ_D FPR64:$rs2, FPR64:$rs2))>;
+def : Pat<(seto FPR64:$rs1, FPR64:$rs1),
+          (FEQ_D $rs1, $rs1)>;
 
 def : Pat<(setuo FPR64:$rs1, FPR64:$rs2),
           (SLTIU (AND (FEQ_D FPR64:$rs1, FPR64:$rs1),
                       (FEQ_D FPR64:$rs2, FPR64:$rs2)),
                  1)>;
+def : Pat<(setuo FPR64:$rs1, FPR64:$rs1),
+          (SLTIU (FEQ_D $rs1, $rs1), 1)>;
 
 def Select_FPR64_Using_CC_GPR : SelectCC_rrirr<FPR64, GPR>;
 

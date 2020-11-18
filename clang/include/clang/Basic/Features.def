@@ -36,6 +36,7 @@
 #define EXTENSION(Name, Predicate)
 #endif
 
+FEATURE(speculative_load_hardening, LangOpts.SpeculativeLoadHardening)
 FEATURE(address_sanitizer,
         LangOpts.Sanitize.hasOneOf(SanitizerKind::Address |
                                    SanitizerKind::KernelAddress))
@@ -253,6 +254,9 @@ EXTENSION(pragma_clang_attribute_namespaces, true)
 EXTENSION(pragma_clang_attribute_external_declaration, true)
 EXTENSION(gnu_asm, LangOpts.GNUAsm)
 EXTENSION(gnu_asm_goto_with_outputs, LangOpts.GNUAsm)
+EXTENSION(matrix_types, LangOpts.MatrixTypes)
+
+FEATURE(cxx_abi_relative_vtable, LangOpts.CPlusPlus && LangOpts.RelativeCXXABIVTables)
 
 #undef EXTENSION
 #undef FEATURE

@@ -16,8 +16,9 @@ using namespace mlir;
 // DictionaryDict derived attributes
 //===----------------------------------------------------------------------===//
 
-namespace mlir {
 #include "mlir/Dialect/SPIRV/TargetAndABI.cpp.inc"
+
+namespace mlir {
 
 //===----------------------------------------------------------------------===//
 // Attribute storage classes
@@ -25,6 +26,32 @@ namespace mlir {
 
 namespace spirv {
 namespace detail {
+
+struct InterfaceVarABIAttributeStorage : public AttributeStorage {
+  using KeyTy = std::tuple<Attribute, Attribute, Attribute>;
+
+  InterfaceVarABIAttributeStorage(Attribute descriptorSet, Attribute binding,
+                                  Attribute storageClass)
+      : descriptorSet(descriptorSet), binding(binding),
+        storageClass(storageClass) {}
+
+  bool operator==(const KeyTy &key) const {
+    return std::get<0>(key) == descriptorSet && std::get<1>(key) == binding &&
+           std::get<2>(key) == storageClass;
+  }
+
+  static InterfaceVarABIAttributeStorage *
+  construct(AttributeStorageAllocator &allocator, const KeyTy &key) {
+    return new (allocator.allocate<InterfaceVarABIAttributeStorage>())
+        InterfaceVarABIAttributeStorage(std::get<0>(key), std::get<1>(key),
+                                        std::get<2>(key));
+  }
+
+  Attribute descriptorSet;
+  Attribute binding;
+  Attribute storageClass;
+};
+
 struct VerCapExtAttributeStorage : public AttributeStorage {
   using KeyTy = std::tuple<Attribute, Attribute, Attribute>;
 
@@ -50,27 +77,103 @@ struct VerCapExtAttributeStorage : public AttributeStorage {
 };
 
 struct TargetEnvAttributeStorage : public AttributeStorage {
-  using KeyTy = std::pair<Attribute, Attribute>;
+  using KeyTy = std::tuple<Attribute, Vendor, DeviceType, uint32_t, Attribute>;
 
-  TargetEnvAttributeStorage(Attribute triple, Attribute limits)
-      : triple(triple), limits(limits) {}
+  TargetEnvAttributeStorage(Attribute triple, Vendor vendorID,
+                            DeviceType deviceType, uint32_t deviceID,
+                            Attribute limits)
+      : triple(triple), limits(limits), vendorID(vendorID),
+        deviceType(deviceType), deviceID(deviceID) {}
 
   bool operator==(const KeyTy &key) const {
-    return key.first == triple && key.second == limits;
+    return key ==
+           std::make_tuple(triple, vendorID, deviceType, deviceID, limits);
   }
 
   static TargetEnvAttributeStorage *
   construct(AttributeStorageAllocator &allocator, const KeyTy &key) {
     return new (allocator.allocate<TargetEnvAttributeStorage>())
-        TargetEnvAttributeStorage(key.first, key.second);
+        TargetEnvAttributeStorage(std::get<0>(key), std::get<1>(key),
+                                  std::get<2>(key), std::get<3>(key),
+                                  std::get<4>(key));
   }
 
   Attribute triple;
   Attribute limits;
+  Vendor vendorID;
+  DeviceType deviceType;
+  uint32_t deviceID;
 };
 } // namespace detail
 } // namespace spirv
 } // namespace mlir
+
+//===----------------------------------------------------------------------===//
+// InterfaceVarABIAttr
+//===----------------------------------------------------------------------===//
+
+spirv::InterfaceVarABIAttr
+spirv::InterfaceVarABIAttr::get(uint32_t descriptorSet, uint32_t binding,
+                                Optional<spirv::StorageClass> storageClass,
+                                MLIRContext *context) {
+  Builder b(context);
+  auto descriptorSetAttr = b.getI32IntegerAttr(descriptorSet);
+  auto bindingAttr = b.getI32IntegerAttr(binding);
+  auto storageClassAttr =
+      storageClass ? b.getI32IntegerAttr(static_cast<uint32_t>(*storageClass))
+                   : IntegerAttr();
+  return get(descriptorSetAttr, bindingAttr, storageClassAttr);
+}
+
+spirv::InterfaceVarABIAttr
+spirv::InterfaceVarABIAttr::get(IntegerAttr descriptorSet, IntegerAttr binding,
+                                IntegerAttr storageClass) {
+  assert(descriptorSet && binding);
+  MLIRContext *context = descriptorSet.getContext();
+  return Base::get(context, descriptorSet, binding, storageClass);
+}
+
+StringRef spirv::InterfaceVarABIAttr::getKindName() {
+  return "interface_var_abi";
+}
+
+uint32_t spirv::InterfaceVarABIAttr::getBinding() {
+  return getImpl()->binding.cast<IntegerAttr>().getInt();
+}
+
+uint32_t spirv::InterfaceVarABIAttr::getDescriptorSet() {
+  return getImpl()->descriptorSet.cast<IntegerAttr>().getInt();
+}
+
+Optional<spirv::StorageClass> spirv::InterfaceVarABIAttr::getStorageClass() {
+  if (getImpl()->storageClass)
+    return static_cast<spirv::StorageClass>(
+        getImpl()->storageClass.cast<IntegerAttr>().getValue().getZExtValue());
+  return llvm::None;
+}
+
+LogicalResult spirv::InterfaceVarABIAttr::verifyConstructionInvariants(
+    Location loc, IntegerAttr descriptorSet, IntegerAttr binding,
+    IntegerAttr storageClass) {
+  if (!descriptorSet.getType().isSignlessInteger(32))
+    return emitError(loc, "expected 32-bit integer for descriptor set");
+
+  if (!binding.getType().isSignlessInteger(32))
+    return emitError(loc, "expected 32-bit integer for binding");
+
+  if (storageClass) {
+    if (auto storageClassAttr = storageClass.cast<IntegerAttr>()) {
+      auto storageClassValue =
+          spirv::symbolizeStorageClass(storageClassAttr.getInt());
+      if (!storageClassValue)
+        return emitError(loc, "unknown storage class");
+    } else {
+      return emitError(loc, "expected valid storage class");
+    }
+  }
+
+  return success();
+}
 
 //===----------------------------------------------------------------------===//
 // VerCapExtAttr
@@ -101,8 +204,7 @@ spirv::VerCapExtAttr spirv::VerCapExtAttr::get(IntegerAttr version,
                                                ArrayAttr extensions) {
   assert(version && capabilities && extensions);
   MLIRContext *context = version.getContext();
-  return Base::get(context, spirv::AttrKind::VerCapExt, version, capabilities,
-                   extensions);
+  return Base::get(context, version, capabilities, extensions);
 }
 
 StringRef spirv::VerCapExtAttr::getKindName() { return "vce"; }
@@ -175,19 +277,22 @@ LogicalResult spirv::VerCapExtAttr::verifyConstructionInvariants(
 //===----------------------------------------------------------------------===//
 
 spirv::TargetEnvAttr spirv::TargetEnvAttr::get(spirv::VerCapExtAttr triple,
+                                               Vendor vendorID,
+                                               DeviceType deviceType,
+                                               uint32_t deviceID,
                                                DictionaryAttr limits) {
   assert(triple && limits && "expected valid triple and limits");
   MLIRContext *context = triple.getContext();
-  return Base::get(context, spirv::AttrKind::TargetEnv, triple, limits);
+  return Base::get(context, triple, vendorID, deviceType, deviceID, limits);
 }
 
 StringRef spirv::TargetEnvAttr::getKindName() { return "target_env"; }
 
-spirv::VerCapExtAttr spirv::TargetEnvAttr::getTripleAttr() {
+spirv::VerCapExtAttr spirv::TargetEnvAttr::getTripleAttr() const {
   return getImpl()->triple.cast<spirv::VerCapExtAttr>();
 }
 
-spirv::Version spirv::TargetEnvAttr::getVersion() {
+spirv::Version spirv::TargetEnvAttr::getVersion() const {
   return getTripleAttr().getVersion();
 }
 
@@ -207,12 +312,26 @@ ArrayAttr spirv::TargetEnvAttr::getCapabilitiesAttr() {
   return getTripleAttr().getCapabilitiesAttr();
 }
 
-spirv::ResourceLimitsAttr spirv::TargetEnvAttr::getResourceLimits() {
+spirv::Vendor spirv::TargetEnvAttr::getVendorID() const {
+  return getImpl()->vendorID;
+}
+
+spirv::DeviceType spirv::TargetEnvAttr::getDeviceType() const {
+  return getImpl()->deviceType;
+}
+
+uint32_t spirv::TargetEnvAttr::getDeviceID() const {
+  return getImpl()->deviceID;
+}
+
+spirv::ResourceLimitsAttr spirv::TargetEnvAttr::getResourceLimits() const {
   return getImpl()->limits.cast<spirv::ResourceLimitsAttr>();
 }
 
 LogicalResult spirv::TargetEnvAttr::verifyConstructionInvariants(
-    Location loc, spirv::VerCapExtAttr triple, DictionaryAttr limits) {
+    Location loc, spirv::VerCapExtAttr /*triple*/, spirv::Vendor /*vendorID*/,
+    spirv::DeviceType /*deviceType*/, uint32_t /*deviceID*/,
+    DictionaryAttr limits) {
   if (!limits.isa<spirv::ResourceLimitsAttr>())
     return emitError(loc, "expected spirv::ResourceLimitsAttr for limits");
 

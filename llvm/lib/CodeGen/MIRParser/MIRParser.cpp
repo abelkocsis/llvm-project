@@ -93,7 +93,8 @@ public:
   /// file.
   ///
   /// Return null if an error occurred.
-  std::unique_ptr<Module> parseIRModule();
+  std::unique_ptr<Module>
+  parseIRModule(DataLayoutCallbackTy DataLayoutCallback);
 
   /// Create an empty function with the given name.
   Function *createDummyFunction(StringRef Name, Module &M);
@@ -160,6 +161,9 @@ private:
                                        SMRange SourceRange);
 
   void computeFunctionProperties(MachineFunction &MF);
+
+  void setupDebugValueTracking(MachineFunction &MF,
+    PerFunctionMIParsingState &PFS, const yaml::MachineFunction &YamlMF);
 };
 
 } // end namespace llvm
@@ -216,13 +220,17 @@ void MIRParserImpl::reportDiagnostic(const SMDiagnostic &Diag) {
   Context.diagnose(DiagnosticInfoMIRParser(Kind, Diag));
 }
 
-std::unique_ptr<Module> MIRParserImpl::parseIRModule() {
+std::unique_ptr<Module>
+MIRParserImpl::parseIRModule(DataLayoutCallbackTy DataLayoutCallback) {
   if (!In.setCurrentDocument()) {
     if (In.error())
       return nullptr;
     // Create an empty module when the MIR file is empty.
     NoMIRDocuments = true;
-    return std::make_unique<Module>(Filename, Context);
+    auto M = std::make_unique<Module>(Filename, Context);
+    if (auto LayoutOverride = DataLayoutCallback(M->getTargetTriple()))
+      M->setDataLayout(*LayoutOverride);
+    return M;
   }
 
   std::unique_ptr<Module> M;
@@ -232,7 +240,7 @@ std::unique_ptr<Module> MIRParserImpl::parseIRModule() {
           dyn_cast_or_null<yaml::BlockScalarNode>(In.getCurrentNode())) {
     SMDiagnostic Error;
     M = parseAssembly(MemoryBufferRef(BSN->getValue(), Filename), Error,
-                      Context, &IRSlots, /*UpgradeDebugInfo=*/false);
+                      Context, &IRSlots, DataLayoutCallback);
     if (!M) {
       reportDiagnostic(diagFromBlockStringDiag(Error, BSN->getSourceRange()));
       return nullptr;
@@ -243,6 +251,8 @@ std::unique_ptr<Module> MIRParserImpl::parseIRModule() {
   } else {
     // Create an new, empty module.
     M = std::make_unique<Module>(Filename, Context);
+    if (auto LayoutOverride = DataLayoutCallback(M->getTargetTriple()))
+      M->setDataLayout(*LayoutOverride);
     NoLLVMIR = true;
   }
   return M;
@@ -315,8 +325,13 @@ bool MIRParserImpl::parseMachineFunction(Module &M, MachineModuleInfo &MMI) {
 static bool isSSA(const MachineFunction &MF) {
   const MachineRegisterInfo &MRI = MF.getRegInfo();
   for (unsigned I = 0, E = MRI.getNumVirtRegs(); I != E; ++I) {
-    unsigned Reg = Register::index2VirtReg(I);
+    Register Reg = Register::index2VirtReg(I);
     if (!MRI.hasOneDef(Reg) && !MRI.def_empty(Reg))
+      return false;
+
+    // Subregister defs are invalid in SSA.
+    const MachineOperand *RegDef = MRI.getOneDef(Reg);
+    if (RegDef && RegDef->getSubReg() != 0)
       return false;
   }
   return true;
@@ -375,7 +390,7 @@ bool MIRParserImpl::initializeCallSiteInfo(
                    " is not a call instruction");
     MachineFunction::CallSiteInfo CSInfo;
     for (auto ArgRegPair : YamlCSInfo.ArgForwardingRegs) {
-      unsigned Reg = 0;
+      Register Reg;
       if (parseNamedRegisterReference(PFS, Reg, ArgRegPair.Reg.Value, Error))
         return error(Error, ArgRegPair.Reg.SourceRange);
       CSInfo.emplace_back(Reg, ArgRegPair.ArgNo);
@@ -388,6 +403,23 @@ bool MIRParserImpl::initializeCallSiteInfo(
   if (YamlMF.CallSitesInfo.size() && !TM.Options.EmitCallSiteInfo)
     return error(Twine("Call site info provided but not used"));
   return false;
+}
+
+void MIRParserImpl::setupDebugValueTracking(
+    MachineFunction &MF, PerFunctionMIParsingState &PFS,
+    const yaml::MachineFunction &YamlMF) {
+  // Compute the value of the "next instruction number" field.
+  unsigned MaxInstrNum = 0;
+  for (auto &MBB : MF)
+    for (auto &MI : MBB)
+      MaxInstrNum = std::max((unsigned)MI.peekDebugInstrNum(), MaxInstrNum);
+  MF.setDebugInstrNumberingCount(MaxInstrNum);
+
+  // Load any substitutions.
+  for (auto &Sub : YamlMF.DebugValueSubstitutions) {
+    MF.makeDebugValueSubstitution(std::make_pair(Sub.SrcInst, Sub.SrcOp),
+                                  std::make_pair(Sub.DstInst, Sub.DstOp));
+  }
 }
 
 bool
@@ -439,11 +471,9 @@ MIRParserImpl::initializeMachineFunction(const yaml::MachineFunction &YamlMF,
   }
   // Check Basic Block Section Flags.
   if (MF.getTarget().getBBSectionsType() == BasicBlockSection::Labels) {
-    MF.createBBLabels();
     MF.setBBSectionsType(BasicBlockSection::Labels);
   } else if (MF.hasBBSections()) {
-    MF.setSectionRange();
-    MF.createBBLabels();
+    MF.assignBeginEndSections();
   }
   PFS.SM = &SM;
 
@@ -499,6 +529,8 @@ MIRParserImpl::initializeMachineFunction(const yaml::MachineFunction &YamlMF,
 
   if (initializeCallSiteInfo(PFS, YamlMF))
     return false;
+
+  setupDebugValueTracking(MF, PFS, YamlMF);
 
   MF.getSubtarget().mirFileLoaded(MF);
 
@@ -557,10 +589,10 @@ bool MIRParserImpl::parseRegisterInfo(PerFunctionMIParsingState &PFS,
 
   // Parse the liveins.
   for (const auto &LiveIn : YamlMF.LiveIns) {
-    unsigned Reg = 0;
+    Register Reg;
     if (parseNamedRegisterReference(PFS, Reg, LiveIn.Register.Value, Error))
       return error(Error, LiveIn.Register.SourceRange);
-    unsigned VReg = 0;
+    Register VReg;
     if (!LiveIn.VirtualRegister.Value.empty()) {
       VRegInfo *Info;
       if (parseVirtualRegisterReference(PFS, Info, LiveIn.VirtualRegister.Value,
@@ -576,7 +608,7 @@ bool MIRParserImpl::parseRegisterInfo(PerFunctionMIParsingState &PFS,
   if (YamlMF.CalleeSavedRegisters) {
     SmallVector<MCPhysReg, 16> CalleeSavedRegisters;
     for (const auto &RegSource : YamlMF.CalleeSavedRegisters.getValue()) {
-      unsigned Reg = 0;
+      Register Reg;
       if (parseNamedRegisterReference(PFS, Reg, RegSource.Value, Error))
         return error(Error, RegSource.SourceRange);
       CalleeSavedRegisters.push_back(Reg);
@@ -594,7 +626,7 @@ bool MIRParserImpl::setupRegisterInfo(const PerFunctionMIParsingState &PFS,
   bool Error = false;
   // Create VRegs
   auto populateVRegInfo = [&] (const VRegInfo &Info, Twine Name) {
-    unsigned Reg = Info.VReg;
+    Register Reg = Info.VReg;
     switch (Info.Kind) {
     case VRegInfo::UNKNOWN:
       error(Twine("Cannot determine class/bank of virtual register ") +
@@ -627,6 +659,12 @@ bool MIRParserImpl::setupRegisterInfo(const PerFunctionMIParsingState &PFS,
 
   // Compute MachineRegisterInfo::UsedPhysRegMask
   for (const MachineBasicBlock &MBB : MF) {
+    // Make sure MRI knows about registers clobbered by unwinder.
+    const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
+    if (MBB.isEHPad())
+      if (auto *RegMask = TRI->getCustomEHPadPreservedMask(MF))
+        MRI.addPhysRegsUsedFromRegMask(RegMask);
+
     for (const MachineInstr &MI : MBB) {
       for (const MachineOperand &MO : MI.operands()) {
         if (!MO.isRegMask())
@@ -765,7 +803,7 @@ bool MIRParserImpl::parseCalleeSavedRegister(PerFunctionMIParsingState &PFS,
     const yaml::StringValue &RegisterSource, bool IsRestored, int FrameIdx) {
   if (RegisterSource.Value.empty())
     return false;
-  unsigned Reg = 0;
+  Register Reg;
   SMDiagnostic Error;
   if (parseNamedRegisterReference(PFS, Reg, RegisterSource.Value, Error))
     return error(Error, RegisterSource.SourceRange);
@@ -841,8 +879,7 @@ bool MIRParserImpl::initializeConstantPool(PerFunctionMIParsingState &PFS,
     const Align PrefTypeAlign =
         M.getDataLayout().getPrefTypeAlign(Value->getType());
     const Align Alignment = YamlConstant.Alignment.getValueOr(PrefTypeAlign);
-    unsigned Index =
-        ConstantPool.getConstantPoolIndex(Value, Alignment.value());
+    unsigned Index = ConstantPool.getConstantPoolIndex(Value, Alignment);
     if (!ConstantPoolSlots.insert(std::make_pair(YamlConstant.ID.Value, Index))
              .second)
       return error(YamlConstant.ID.SourceRange.Start,
@@ -934,8 +971,9 @@ MIRParser::MIRParser(std::unique_ptr<MIRParserImpl> Impl)
 
 MIRParser::~MIRParser() {}
 
-std::unique_ptr<Module> MIRParser::parseIRModule() {
-  return Impl->parseIRModule();
+std::unique_ptr<Module>
+MIRParser::parseIRModule(DataLayoutCallbackTy DataLayoutCallback) {
+  return Impl->parseIRModule(DataLayoutCallback);
 }
 
 bool MIRParser::parseMachineFunctions(Module &M, MachineModuleInfo &MMI) {

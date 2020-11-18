@@ -39,6 +39,7 @@ namespace std
 */
 
 #include <__config>
+#include <__availability>
 #include <atomic>
 
 #if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
@@ -69,7 +70,7 @@ public:
     latch(const latch&) = delete;
     latch& operator=(const latch&) = delete;
 
-    inline _LIBCPP_INLINE_VISIBILITY
+    inline _LIBCPP_AVAILABILITY_SYNC _LIBCPP_INLINE_VISIBILITY
     void count_down(ptrdiff_t __update = 1)
     {
         auto const __old = __a.fetch_sub(__update, memory_order_release);
@@ -81,7 +82,7 @@ public:
     {
         return 0 == __a.load(memory_order_acquire);
     }
-    inline _LIBCPP_INLINE_VISIBILITY
+    inline _LIBCPP_AVAILABILITY_SYNC _LIBCPP_INLINE_VISIBILITY
     void wait() const
     {
         auto const __test_fn = [=]() -> bool {
@@ -89,7 +90,7 @@ public:
         };
         __cxx_atomic_wait(&__a.__a_, __test_fn);
     }
-    inline _LIBCPP_INLINE_VISIBILITY
+    inline _LIBCPP_AVAILABILITY_SYNC _LIBCPP_INLINE_VISIBILITY
     void arrive_and_wait(ptrdiff_t __update = 1)
     {
         count_down(__update);

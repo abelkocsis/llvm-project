@@ -9,12 +9,12 @@
 #include "refactor/Rename.h"
 #include "AST.h"
 #include "FindTarget.h"
-#include "Logger.h"
 #include "ParsedAST.h"
 #include "Selection.h"
 #include "SourceCode.h"
-#include "Trace.h"
 #include "index/SymbolCollector.h"
+#include "support/Logger.h"
+#include "support/Trace.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclTemplate.h"
 #include "clang/Basic/SourceLocation.h"
@@ -63,7 +63,7 @@ llvm::Optional<std::string> getOtherRefFile(const Decl &D, StringRef MainFile,
   // tradeoff. We expect the number of symbol references in the current file
   // is smaller than the limit.
   Req.Limit = 100;
-  Req.IDs.insert(*getSymbolID(&D));
+  Req.IDs.insert(getSymbolID(&D));
   llvm::Optional<std::string> OtherFile;
   Index.refs(Req, [&](const Ref &R) {
     if (OtherFile)
@@ -98,10 +98,10 @@ llvm::DenseSet<const NamedDecl *> locateDeclAt(ParsedAST &AST,
   return Result;
 }
 
-// By default, we blacklist C++ standard symbols and protobuf symbols as rename
+// By default, we exclude C++ standard symbols and protobuf symbols as rename
 // these symbols would change system/generated files which are unlikely to be
 // modified.
-bool isBlacklisted(const NamedDecl &RenameDecl) {
+bool isExcluded(const NamedDecl &RenameDecl) {
   if (isProtoFile(RenameDecl.getLocation(),
                   RenameDecl.getASTContext().getSourceManager()))
     return true;
@@ -113,13 +113,17 @@ bool isBlacklisted(const NamedDecl &RenameDecl) {
   return StdSymbols->count(printQualifiedName(RenameDecl));
 }
 
-enum ReasonToReject {
+enum class ReasonToReject {
   NoSymbolFound,
   NoIndexProvided,
   NonIndexable,
   UsedOutsideFile, // for within-file rename only.
   UnsupportedSymbol,
   AmbiguousSymbol,
+
+  // name validation.
+  RenameToKeywords,
+  SameName,
 };
 
 llvm::Optional<ReasonToReject> renameable(const NamedDecl &RenameDecl,
@@ -138,7 +142,7 @@ llvm::Optional<ReasonToReject> renameable(const NamedDecl &RenameDecl,
   if (RenameDecl.getParentFunctionOrMethod())
     return None;
 
-  if (isBlacklisted(RenameDecl))
+  if (isExcluded(RenameDecl))
     return ReasonToReject::UnsupportedSymbol;
 
   // Check whether the symbol being rename is indexable.
@@ -182,8 +186,6 @@ llvm::Optional<ReasonToReject> renameable(const NamedDecl &RenameDecl,
   }
 
   assert(CrossFile);
-  if (!Index)
-    return ReasonToReject::NoIndexProvided;
 
   // FIXME: Renaming virtual methods requires to rename all overridens in
   // subclasses, our index doesn't have this information.
@@ -208,20 +210,22 @@ llvm::Error makeError(ReasonToReject Reason) {
       return "symbol may be used in other files (not eligible for indexing)";
     case ReasonToReject::UnsupportedSymbol:
       return "symbol is not a supported kind (e.g. namespace, macro)";
-    case AmbiguousSymbol:
+    case ReasonToReject::AmbiguousSymbol:
       return "there are multiple symbols at the given location";
+    case ReasonToReject::RenameToKeywords:
+      return "the chosen name is a keyword";
+    case ReasonToReject::SameName:
+      return "new name is the same as the old name";
     }
     llvm_unreachable("unhandled reason kind");
   };
-  return llvm::make_error<llvm::StringError>(
-      llvm::formatv("Cannot rename symbol: {0}", Message(Reason)),
-      llvm::inconvertibleErrorCode());
+  return error("Cannot rename symbol: {0}", Message(Reason));
 }
 
 // Return all rename occurrences in the main file.
 std::vector<SourceLocation> findOccurrencesWithinFile(ParsedAST &AST,
                                                       const NamedDecl &ND) {
-  trace::Span Tracer("FindOccurrenceeWithinFile");
+  trace::Span Tracer("FindOccurrencesWithinFile");
   // If the cursor is at the underlying CXXRecordDecl of the
   // ClassTemplateDecl, ND will be the CXXRecordDecl. In this case, we need to
   // get the primary template manually.
@@ -243,7 +247,7 @@ std::vector<SourceLocation> findOccurrencesWithinFile(ParsedAST &AST,
         return;
       for (const auto *Target : Ref.Targets) {
         auto ID = getSymbolID(Target);
-        if (!ID || TargetIDs.find(*ID) == TargetIDs.end())
+        if (!ID || TargetIDs.find(ID) == TargetIDs.end())
           return;
       }
       Results.push_back(Ref.NameLoc);
@@ -251,6 +255,84 @@ std::vector<SourceLocation> findOccurrencesWithinFile(ParsedAST &AST,
   }
 
   return Results;
+}
+
+// Lookup the declarations (if any) with the given Name in the context of
+// RenameDecl.
+const NamedDecl *lookupSiblingWithName(const ASTContext &Ctx,
+                                       const NamedDecl &RenamedDecl,
+                                       llvm::StringRef Name) {
+  const auto &II = Ctx.Idents.get(Name);
+  DeclarationName LookupName(&II);
+  DeclContextLookupResult LookupResult;
+  const auto *DC = RenamedDecl.getDeclContext();
+  while (DC && DC->isTransparentContext())
+    DC = DC->getParent();
+  switch (DC->getDeclKind()) {
+  // The enclosing DeclContext may not be the enclosing scope, it might have
+  // false positives and negatives, so we only choose "confident" DeclContexts
+  // that don't have any subscopes that are neither DeclContexts nor
+  // transparent.
+  //
+  // Notably, FunctionDecl is excluded -- because local variables are not scoped
+  // to the function, but rather to the CompoundStmt that is its body. Lookup
+  // will not find function-local variables.
+  case Decl::TranslationUnit:
+  case Decl::Namespace:
+  case Decl::Record:
+  case Decl::Enum:
+  case Decl::CXXRecord:
+    LookupResult = DC->lookup(LookupName);
+    break;
+  default:
+    break;
+  }
+  // Lookup may contain the RenameDecl itself, exclude it.
+  for (const auto *D : LookupResult)
+    if (D->getCanonicalDecl() != RenamedDecl.getCanonicalDecl())
+      return D;
+  return nullptr;
+}
+
+struct InvalidName {
+  enum Kind {
+    Keywords,
+    Conflict,
+  };
+  Kind K;
+  std::string Details;
+};
+
+llvm::Error makeError(InvalidName Reason) {
+  auto Message = [](InvalidName Reason) {
+    switch (Reason.K) {
+    case InvalidName::Keywords:
+      return llvm::formatv("the chosen name \"{0}\" is a keyword",
+                           Reason.Details);
+    case InvalidName::Conflict:
+      return llvm::formatv("conflict with the symbol in {0}", Reason.Details);
+    }
+    llvm_unreachable("unhandled InvalidName kind");
+  };
+  return error("invalid name: {0}", Message(Reason));
+}
+
+// Check if we can rename the given RenameDecl into NewName.
+// Return details if the rename would produce a conflict.
+llvm::Optional<InvalidName> checkName(const NamedDecl &RenameDecl,
+                                      llvm::StringRef NewName) {
+  auto &ASTCtx = RenameDecl.getASTContext();
+  if (isKeyword(NewName, ASTCtx.getLangOpts()))
+    return InvalidName{InvalidName::Keywords, NewName.str()};
+  // Name conflict detection.
+  // Function conflicts are subtle (overloading), so ignore them.
+  if (RenameDecl.getKind() != Decl::Function) {
+    if (auto *Conflict = lookupSiblingWithName(ASTCtx, RenameDecl, NewName))
+      return InvalidName{
+          InvalidName::Conflict,
+          Conflict->getLocation().printToString(ASTCtx.getSourceManager())};
+  }
+  return llvm::None;
 }
 
 // AST-based rename, it renames all occurrences in the main file.
@@ -303,7 +385,7 @@ findOccurrencesOutsideFile(const NamedDecl &RenameDecl,
                            size_t MaxLimitFiles) {
   trace::Span Tracer("FindOccurrencesOutsideFile");
   RefsRequest RQuest;
-  RQuest.IDs.insert(*getSymbolID(&RenameDecl));
+  RQuest.IDs.insert(getSymbolID(&RenameDecl));
 
   // Absolute file path => rename occurrences in that file.
   llvm::StringMap<std::vector<Range>> AffectedFiles;
@@ -319,16 +401,11 @@ findOccurrencesOutsideFile(const NamedDecl &RenameDecl,
   });
 
   if (AffectedFiles.size() >= MaxLimitFiles)
-    return llvm::make_error<llvm::StringError>(
-        llvm::formatv("The number of affected files exceeds the max limit {0}",
-                      MaxLimitFiles),
-        llvm::inconvertibleErrorCode());
-  if (HasMore) {
-    return llvm::make_error<llvm::StringError>(
-        llvm::formatv("The symbol {0} has too many occurrences",
-                      RenameDecl.getQualifiedNameAsString()),
-        llvm::inconvertibleErrorCode());
-  }
+    return error("The number of affected files exceeds the max limit {0}",
+                 MaxLimitFiles);
+  if (HasMore)
+    return error("The symbol {0} has too many occurrences",
+                 RenameDecl.getQualifiedNameAsString());
   // Sort and deduplicate the results, in case that index returns duplications.
   for (auto &FileAndOccurrences : AffectedFiles) {
     auto &Ranges = FileAndOccurrences.getValue();
@@ -379,20 +456,15 @@ llvm::Expected<FileEdits> renameOutsideFile(
       // Our heuristics fails to adjust rename ranges to the current state of
       // the file, it is most likely the index is stale, so we give up the
       // entire rename.
-      return llvm::make_error<llvm::StringError>(
-          llvm::formatv("Index results don't match the content of file {0} "
-                        "(the index may be stale)",
-                        FilePath),
-          llvm::inconvertibleErrorCode());
+      return error("Index results don't match the content of file {0} "
+                   "(the index may be stale)",
+                   FilePath);
     }
     auto RenameEdit =
         buildRenameEdit(FilePath, *AffectedFileCode, *RenameRanges, NewName);
-    if (!RenameEdit) {
-      return llvm::make_error<llvm::StringError>(
-          llvm::formatv("fail to build rename edit for file {0}: {1}", FilePath,
-                        llvm::toString(RenameEdit.takeError())),
-          llvm::inconvertibleErrorCode());
-    }
+    if (!RenameEdit)
+      return error("failed to rename in file {0}: {1}", FilePath,
+                   RenameEdit.takeError());
     if (!RenameEdit->Replacements.empty())
       Results.insert({FilePath, std::move(*RenameEdit)});
   }
@@ -439,7 +511,7 @@ void findNearMiss(
 
 } // namespace
 
-llvm::Expected<FileEdits> rename(const RenameInputs &RInputs) {
+llvm::Expected<RenameResult> rename(const RenameInputs &RInputs) {
   trace::Span Tracer("Rename flow");
   const auto &Opts = RInputs.Opts;
   ParsedAST &AST = RInputs.AST;
@@ -455,14 +527,10 @@ llvm::Expected<FileEdits> rename(const RenameInputs &RInputs) {
     auto Content =
         SM.getFileManager().getVirtualFileSystem().getBufferForFile(AbsPath);
     if (!Content)
-      return llvm::createStringError(
-          llvm::inconvertibleErrorCode(),
-          llvm::formatv("Fail to open file {0}: {1}", AbsPath,
-                        Content.getError().message()));
+      return error("Fail to open file {0}: {1}", AbsPath,
+                   Content.getError().message());
     if (!*Content)
-      return llvm::createStringError(
-          llvm::inconvertibleErrorCode(),
-          llvm::formatv("Got no buffer for file {0}", AbsPath));
+      return error("Got no buffer for file {0}", AbsPath);
 
     return (*Content)->getBuffer().str();
   };
@@ -472,9 +540,13 @@ llvm::Expected<FileEdits> rename(const RenameInputs &RInputs) {
     return Loc.takeError();
   const syntax::Token *IdentifierToken =
       spelledIdentifierTouching(*Loc, AST.getTokens());
+
   // Renames should only triggered on identifiers.
   if (!IdentifierToken)
     return makeError(ReasonToReject::NoSymbolFound);
+  Range CurrentIdentifier = halfOpenToRange(
+      SM, CharSourceRange::getCharRange(IdentifierToken->location(),
+                                        IdentifierToken->endLocation()));
   // FIXME: Renaming macros is not supported yet, the macro-handling code should
   // be moved to rename tooling library.
   if (locateMacroAt(*IdentifierToken, AST.getPreprocessor()))
@@ -485,9 +557,14 @@ llvm::Expected<FileEdits> rename(const RenameInputs &RInputs) {
     return makeError(ReasonToReject::NoSymbolFound);
   if (DeclsUnderCursor.size() > 1)
     return makeError(ReasonToReject::AmbiguousSymbol);
-
   const auto &RenameDecl =
       llvm::cast<NamedDecl>(*(*DeclsUnderCursor.begin())->getCanonicalDecl());
+  if (RenameDecl.getName() == RInputs.NewName)
+    return makeError(ReasonToReject::SameName);
+  auto Invalid = checkName(RenameDecl, RInputs.NewName);
+  if (Invalid)
+    return makeError(*Invalid);
+
   auto Reject = renameable(RenameDecl, RInputs.MainFilePath, RInputs.Index,
                            Opts.AllowCrossFile);
   if (Reject)
@@ -505,32 +582,40 @@ llvm::Expected<FileEdits> rename(const RenameInputs &RInputs) {
   auto MainFileRenameEdit = renameWithinFile(AST, RenameDecl, RInputs.NewName);
   if (!MainFileRenameEdit)
     return MainFileRenameEdit.takeError();
+  RenameResult Result;
+  Result.Target = CurrentIdentifier;
+  Edit MainFileEdits = Edit(MainFileCode, std::move(*MainFileRenameEdit));
+  llvm::for_each(MainFileEdits.asTextEdits(), [&Result](const TextEdit &TE) {
+    Result.LocalChanges.push_back(TE.range);
+  });
 
   // return the main file edit if this is a within-file rename or the symbol
   // being renamed is function local.
   if (!Opts.AllowCrossFile || RenameDecl.getParentFunctionOrMethod()) {
-    return FileEdits(
-        {std::make_pair(RInputs.MainFilePath,
-                        Edit{MainFileCode, std::move(*MainFileRenameEdit)})});
+    Result.GlobalChanges = FileEdits(
+        {std::make_pair(RInputs.MainFilePath, std::move(MainFileEdits))});
+    return Result;
   }
 
-  FileEdits Results;
-  // Renameable safely guards us that at this point we are renaming a local
-  // symbol if we don't have index.
-  if (RInputs.Index) {
-    auto OtherFilesEdits = renameOutsideFile(
-        RenameDecl, RInputs.MainFilePath, RInputs.NewName, *RInputs.Index,
-        Opts.LimitFiles == 0 ? std::numeric_limits<size_t>::max()
-                             : Opts.LimitFiles,
-        GetFileContent);
-    if (!OtherFilesEdits)
-      return OtherFilesEdits.takeError();
-    Results = std::move(*OtherFilesEdits);
+  // If the index is nullptr, we don't know the completeness of the result, so
+  // we don't populate the field GlobalChanges.
+  if (!RInputs.Index) {
+    assert(Result.GlobalChanges.empty() && Opts.AllowCrossFile);
+    return Result;
   }
+
+  auto OtherFilesEdits = renameOutsideFile(
+      RenameDecl, RInputs.MainFilePath, RInputs.NewName, *RInputs.Index,
+      Opts.LimitFiles == 0 ? std::numeric_limits<size_t>::max()
+                           : Opts.LimitFiles,
+      GetFileContent);
+  if (!OtherFilesEdits)
+    return OtherFilesEdits.takeError();
+  Result.GlobalChanges = *OtherFilesEdits;
   // Attach the rename edits for the main file.
-  Results.try_emplace(RInputs.MainFilePath, MainFileCode,
-                      std::move(*MainFileRenameEdit));
-  return Results;
+  Result.GlobalChanges.try_emplace(RInputs.MainFilePath,
+                                   std::move(MainFileEdits));
+  return Result;
 }
 
 llvm::Expected<Edit> buildRenameEdit(llvm::StringRef AbsFilePath,
@@ -559,10 +644,8 @@ llvm::Expected<Edit> buildRenameEdit(llvm::StringRef AbsFilePath,
     auto ShiftedOffset =
         positionToOffset(InitialCode.substr(LastOffset), Shifted);
     if (!ShiftedOffset)
-      return llvm::make_error<llvm::StringError>(
-          llvm::formatv("fail to convert the position {0} to offset ({1})", P,
-                        llvm::toString(ShiftedOffset.takeError())),
-          llvm::inconvertibleErrorCode());
+      return error("fail to convert the position {0} to offset ({1})", P,
+                   ShiftedOffset.takeError());
     LastPos = P;
     LastOffset += *ShiftedOffset;
     return LastOffset;

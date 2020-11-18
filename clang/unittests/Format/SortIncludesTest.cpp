@@ -38,8 +38,7 @@ protected:
     return *Result;
   }
 
-  std::string sort(StringRef Code,
-                   StringRef FileName = "input.cpp",
+  std::string sort(StringRef Code, StringRef FileName = "input.cpp",
                    unsigned ExpectedNumRanges = 1) {
     return sort(Code, GetCodeRange(Code), FileName, ExpectedNumRanges);
   }
@@ -152,6 +151,23 @@ TEST_F(SortIncludesTest, NoReplacementsForValidIncludes) {
   EXPECT_TRUE(sortIncludes(FmtStyle, Code, GetCodeRange(Code), "a.cc").empty());
 }
 
+TEST_F(SortIncludesTest, MainFileHeader) {
+  std::string Code = "#include <string>\n"
+                     "\n"
+                     "#include \"a/extra_action.proto.h\"\n";
+  FmtStyle = getGoogleStyle(FormatStyle::LK_Cpp);
+  EXPECT_TRUE(
+      sortIncludes(FmtStyle, Code, GetCodeRange(Code), "a/extra_action.cc")
+          .empty());
+
+  EXPECT_EQ("#include \"foo.bar.h\"\n"
+            "\n"
+            "#include \"a.h\"\n",
+            sort("#include \"a.h\"\n"
+                 "#include \"foo.bar.h\"\n",
+                 "foo.bar.cc"));
+}
+
 TEST_F(SortIncludesTest, SortedIncludesInMultipleBlocksAreMerged) {
   Style.IncludeBlocks = tooling::IncludeStyle::IBS_Merge;
   EXPECT_EQ("#include \"a.h\"\n"
@@ -227,7 +243,8 @@ TEST_F(SortIncludesTest, SupportClangFormatOffCStyle) {
                  "#include <b>\n"
                  "#include <a>\n"
                  "#include <c>\n"
-                 "/* clang-format onwards */\n", "input.h", 2));
+                 "/* clang-format onwards */\n",
+                 "input.h", 2));
 }
 
 TEST_F(SortIncludesTest, IncludeSortingCanBeDisabled) {
@@ -291,7 +308,8 @@ TEST_F(SortIncludesTest, SortsLocallyInEachBlock) {
             sort("#include \"a.h\"\n"
                  "#include \"c.h\"\n"
                  "\n"
-                 "#include \"b.h\"\n", "input.h", 0));
+                 "#include \"b.h\"\n",
+                 "input.h", 0));
 }
 
 TEST_F(SortIncludesTest, SortsAllBlocksWhenMerging) {
@@ -762,7 +780,8 @@ TEST_F(SortIncludesTest, DoNotSortLikelyXml) {
             sort("<!--;\n"
                  "#include <b>\n"
                  "#include <a>\n"
-                 "-->", "input.h", 0));
+                 "-->",
+                 "input.h", 0));
 }
 
 TEST_F(SortIncludesTest, DoNotOutputReplacementsForSortedBlocksWithRegrouping) {

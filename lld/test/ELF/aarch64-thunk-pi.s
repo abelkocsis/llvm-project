@@ -1,13 +1,12 @@
 // REQUIRES: aarch64
-// RUN: llvm-mc -filetype=obj -triple=aarch64 %s -o %t.o
-// RUN: echo "SECTIONS { \
-// RUN:       .text_low : { *(.text_low) } \
-// RUN:       .text_high 0x10000000 : { *(.text_high) } \
-// RUN:       } " > %t.script
-// RUN: ld.lld --script %t.script --shared %t.o -o %t.so 2>&1
+// RUN: split-file %s %t
+// RUN: llvm-mc -filetype=obj -triple=aarch64 %t/asm -o %t.o
+// RUN: ld.lld --script %t/lds --shared %t.o -o %t.so 2>&1
 // RUN: llvm-objdump -d --no-show-raw-insn --print-imm-hex %t.so | FileCheck %s
 
 // Check that Position Independent thunks are generated for shared libraries.
+
+//--- asm
  .section .text_low, "ax", %progbits
  .globl low_target
  .type low_target, %function
@@ -16,7 +15,7 @@ low_target:
  bl high_target
  ret
 // CHECK: <low_target>:
-// CHECK-NEXT:       d8:       bl      #0x14 <__AArch64ADRPThunk_high_target>
+// CHECK-NEXT:       d8:       bl      0xec <__AArch64ADRPThunk_high_target>
 // CHECK-NEXT:                 ret
 
  .hidden low_target2
@@ -29,8 +28,8 @@ low_target2:
  bl .text_high+8
  ret
 // CHECK: <low_target2>:
-// CHECK-NEXT:       e0:       bl      #0x18 <__AArch64ADRPThunk_high_target2>
-// CHECK-NEXT:       e4:       bl      #0x20 <__AArch64ADRPThunk_>
+// CHECK-NEXT:       e0:       bl      0xf8 <__AArch64ADRPThunk_high_target2>
+// CHECK-NEXT:       e4:       bl      0x104 <__AArch64ADRPThunk_>
 // CHECK-NEXT:                 ret
 
 // Expect range extension thunks for .text_low
@@ -58,7 +57,7 @@ high_target:
  bl low_target
  ret
 // CHECK: <high_target>:
-// CHECK-NEXT: 10000000:       bl #0x50 <low_target@plt>
+// CHECK-NEXT: 10000000:       bl 0x10000050 <low_target@plt>
 // CHECK-NEXT:                 ret
 
  .hidden high_target2
@@ -69,7 +68,7 @@ high_target2:
  bl low_target2
  ret
 // CHECK: <high_target2>:
-// CHECK-NEXT: 10000008:       bl      #0x8 <__AArch64ADRPThunk_low_target2>
+// CHECK-NEXT: 10000008:       bl      0x10000010 <__AArch64ADRPThunk_low_target2>
 // CHECK-NEXT:                 ret
 
 // Expect Thunk for .text.high
@@ -102,3 +101,13 @@ high_target2:
 // CHECK-NEXT:                 ldr     x17, [x16, #0x130]
 // CHECK-NEXT:                 add     x16, x16, #0x130
 // CHECK-NEXT:                 br      x17
+
+//--- lds
+PHDRS {
+  low PT_LOAD FLAGS(0x1 | 0x4);
+  high PT_LOAD FLAGS(0x1 | 0x4);
+}
+SECTIONS {
+  .text_low : { *(.text_low) } :low
+  .text_high 0x10000000 : { *(.text_high) } :high
+}

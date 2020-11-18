@@ -10880,3 +10880,19 @@ enqcmds 8128(%bx,%di), %ax
 // CHECK: serialize
 // CHECK: encoding: [0x0f,0x01,0xe8]
 serialize
+
+// CHECK: xsusldtrk
+// CHECK: encoding: [0xf2,0x0f,0x01,0xe8]
+xsusldtrk
+
+// CHECK: xresldtrk
+// CHECK: encoding: [0xf2,0x0f,0x01,0xe9]
+xresldtrk
+
+// CHECK: tdcall
+// CHECK: encoding: [0x66,0x0f,0x01,0xcc]
+tdcall
+
+// CHECK: hreset
+// CHECK: encoding: [0xf3,0x0f,0x3a,0xf0,0xc0,0x01]
+hreset $1

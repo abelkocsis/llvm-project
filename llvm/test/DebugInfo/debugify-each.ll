@@ -1,6 +1,9 @@
 ; RUN: opt -debugify-each -O3 -S -o /dev/null < %s 2> %t
 ; RUN: FileCheck %s -input-file=%t -check-prefix=MODULE-PASS
 ; RUN: FileCheck %s -input-file=%t -check-prefix=FUNCTION-PASS
+; RUN: opt -disable-output -debugify-each -passes='default<O3>' %s 2> %t
+; RUN: FileCheck %s -input-file=%t -check-prefix=MODULE-PASS
+; RUN: FileCheck %s -input-file=%t -check-prefix=FUNCTION-PASS
 
 ; RUN: opt -enable-debugify -debugify-each -O3 -S -o /dev/null < %s 2> %t
 ; RUN: FileCheck %s -input-file=%t -check-prefix=MODULE-PASS
@@ -18,19 +21,13 @@
 
 ; Check that stripped textual IR compares equal before and after applying
 ; debugify.
-; RUN: opt -O1 < %s -S -o - | \
-; RUN:   opt -strip -strip-dead-prototypes -strip-named-metadata -S -o %t.before
-; RUN: opt -O1 -debugify-each < %s -S -o - | \
-; RUN:   opt -strip -strip-dead-prototypes -strip-named-metadata -S -o %t.after
+; RUN: opt -O1 < %s -S -o %t.before
+; RUN: opt -O1 -debugify-each < %s -S -o %t.after
 ; RUN: diff %t.before %t.after
 
 ; Check that stripped IR compares equal before and after applying debugify.
-; RUN: opt -O1 < %s | \
-; RUN:   opt -strip -strip-dead-prototypes -strip-named-metadata | \
-; RUN:   llvm-dis -o %t.before
-; RUN: opt -O1 -debugify-each < %s | \
-; RUN:   opt -strip -strip-dead-prototypes -strip-named-metadata | \
-; RUN:   llvm-dis -o %t.after
+; RUN: opt -O1 < %s | llvm-dis -o %t.before
+; RUN: opt -O1 -debugify-each < %s | llvm-dis -o %t.after
 ; RUN: diff %t.before %t.after
 
 define void @foo(i32 %arg) {

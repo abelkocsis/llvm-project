@@ -18,6 +18,7 @@
 #include "X86Subtarget.h"
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallSet.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
@@ -627,18 +628,22 @@ static bool CantUseSP(const MachineFrameInfo &MFI) {
 }
 
 bool X86RegisterInfo::hasBasePointer(const MachineFunction &MF) const {
-   const MachineFrameInfo &MFI = MF.getFrameInfo();
+  const X86MachineFunctionInfo *X86FI = MF.getInfo<X86MachineFunctionInfo>();
+  if (X86FI->hasPreallocatedCall())
+    return true;
 
-   if (!EnableBasePointer)
-     return false;
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
 
-   // When we need stack realignment, we can't address the stack from the frame
-   // pointer.  When we have dynamic allocas or stack-adjusting inline asm, we
-   // can't address variables from the stack pointer.  MS inline asm can
-   // reference locals while also adjusting the stack pointer.  When we can't
-   // use both the SP and the FP, we need a separate base pointer register.
-   bool CantUseFP = needsStackRealignment(MF);
-   return CantUseFP && CantUseSP(MFI);
+  if (!EnableBasePointer)
+    return false;
+
+  // When we need stack realignment, we can't address the stack from the frame
+  // pointer.  When we have dynamic allocas or stack-adjusting inline asm, we
+  // can't address variables from the stack pointer.  MS inline asm can
+  // reference locals while also adjusting the stack pointer.  When we can't
+  // use both the SP and the FP, we need a separate base pointer register.
+  bool CantUseFP = needsStackRealignment(MF);
+  return CantUseFP && CantUseSP(MFI);
 }
 
 bool X86RegisterInfo::canRealignStack(const MachineFunction &MF) const {
@@ -658,13 +663,6 @@ bool X86RegisterInfo::canRealignStack(const MachineFunction &MF) const {
   if (CantUseSP(MFI))
     return MRI->canReserveReg(BasePtr);
   return true;
-}
-
-bool X86RegisterInfo::hasReservedSpillSlot(const MachineFunction &MF,
-                                           unsigned Reg, int &FrameIdx) const {
-  // Since X86 defines assignCalleeSavedSpillSlots which always return true
-  // this function neither used nor tested.
-  llvm_unreachable("Unused function on X86. Otherwise need a test case.");
 }
 
 // tryOptimizeLEAtoMOV - helper function that tries to replace a LEA instruction
@@ -722,16 +720,17 @@ X86RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
 
   // Determine base register and offset.
   int FIOffset;
-  unsigned BasePtr;
+  Register BasePtr;
   if (MI.isReturn()) {
     assert((!needsStackRealignment(MF) ||
            MF.getFrameInfo().isFixedObjectIndex(FrameIndex)) &&
            "Return instruction can only reference SP relative frame objects");
-    FIOffset = TFI->getFrameIndexReferenceSP(MF, FrameIndex, BasePtr, 0);
+    FIOffset =
+        TFI->getFrameIndexReferenceSP(MF, FrameIndex, BasePtr, 0).getFixed();
   } else if (TFI->Is64Bit && (MBB.isEHFuncletEntry() || IsEHFuncletEpilogue)) {
     FIOffset = TFI->getWin64EHFrameIndexRef(MF, FrameIndex, BasePtr);
   } else {
-    FIOffset = TFI->getFrameIndexReference(MF, FrameIndex, BasePtr);
+    FIOffset = TFI->getFrameIndexReference(MF, FrameIndex, BasePtr).getFixed();
   }
 
   // LOCAL_ESCAPE uses a single offset, with no register. It only works in the
@@ -784,6 +783,55 @@ X86RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
       (uint64_t)MI.getOperand(FIOperandNum+3).getOffset();
     MI.getOperand(FIOperandNum + 3).setOffset(Offset);
   }
+}
+
+unsigned X86RegisterInfo::findDeadCallerSavedReg(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator &MBBI) const {
+  const MachineFunction *MF = MBB.getParent();
+  if (MF->callsEHReturn())
+    return 0;
+
+  const TargetRegisterClass &AvailableRegs = *getGPRsForTailCall(*MF);
+
+  if (MBBI == MBB.end())
+    return 0;
+
+  switch (MBBI->getOpcode()) {
+  default:
+    return 0;
+  case TargetOpcode::PATCHABLE_RET:
+  case X86::RET:
+  case X86::RETL:
+  case X86::RETQ:
+  case X86::RETIL:
+  case X86::RETIQ:
+  case X86::TCRETURNdi:
+  case X86::TCRETURNri:
+  case X86::TCRETURNmi:
+  case X86::TCRETURNdi64:
+  case X86::TCRETURNri64:
+  case X86::TCRETURNmi64:
+  case X86::EH_RETURN:
+  case X86::EH_RETURN64: {
+    SmallSet<uint16_t, 8> Uses;
+    for (unsigned I = 0, E = MBBI->getNumOperands(); I != E; ++I) {
+      MachineOperand &MO = MBBI->getOperand(I);
+      if (!MO.isReg() || MO.isDef())
+        continue;
+      Register Reg = MO.getReg();
+      if (!Reg)
+        continue;
+      for (MCRegAliasIterator AI(Reg, this, true); AI.isValid(); ++AI)
+        Uses.insert(*AI);
+    }
+
+    for (auto CS : AvailableRegs)
+      if (!Uses.count(CS) && CS != X86::RIP && CS != X86::RSP && CS != X86::ESP)
+        return CS;
+  }
+  }
+
+  return 0;
 }
 
 Register X86RegisterInfo::getFrameRegister(const MachineFunction &MF) const {

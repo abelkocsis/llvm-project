@@ -7,9 +7,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "AST.h"
+#include "Config.h"
 #include "FindTarget.h"
-#include "Logger.h"
 #include "refactor/Tweak.h"
+#include "support/Logger.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/RecursiveASTVisitor.h"
 
@@ -37,7 +38,9 @@ public:
   bool prepare(const Selection &Inputs) override;
   Expected<Effect> apply(const Selection &Inputs) override;
   std::string title() const override;
-  Intent intent() const override { return Refactor; }
+  llvm::StringLiteral kind() const override {
+    return CodeAction::REFACTOR_KIND;
+  }
 
 private:
   // The qualifier to remove. Set by prepare().
@@ -86,6 +89,13 @@ private:
   const SourceManager &SM;
 };
 
+bool isFullyQualified(const NestedNameSpecifier *NNS) {
+  if (!NNS)
+    return false;
+  return NNS->getKind() == NestedNameSpecifier::Global ||
+         isFullyQualified(NNS->getPrefix());
+}
+
 struct InsertionPointData {
   // Location to insert the "using" statement. If invalid then the statement
   // should not be inserted at all (it already exists).
@@ -94,6 +104,9 @@ struct InsertionPointData {
   // insertion point is anchored to, we may need one or more \n to ensure
   // proper formatting.
   std::string Suffix;
+  // Whether using should be fully qualified, even if what the user typed was
+  // not. This is based on our detection of the local style.
+  bool AlwaysFullyQualify = false;
 };
 
 // Finds the best place to insert the "using" statement. Returns invalid
@@ -118,7 +131,13 @@ findInsertionPoint(const Tweak::Selection &Inputs,
               SM)
       .TraverseAST(Inputs.AST->getASTContext());
 
+  bool AlwaysFullyQualify = true;
   for (auto &U : Usings) {
+    // Only "upgrade" to fully qualified is all relevant using decls are fully
+    // qualified. Otherwise trust what the user typed.
+    if (!isFullyQualified(U->getQualifier()))
+      AlwaysFullyQualify = false;
+
     if (SM.isBeforeInTranslationUnit(Inputs.Cursor, U->getUsingLoc()))
       // "Usings" is sorted, so we're done.
       break;
@@ -137,21 +156,23 @@ findInsertionPoint(const Tweak::Selection &Inputs,
   if (LastUsingLoc.isValid()) {
     InsertionPointData Out;
     Out.Loc = LastUsingLoc;
+    Out.AlwaysFullyQualify = AlwaysFullyQualify;
     return Out;
   }
 
   // No relevant "using" statements. Try the nearest namespace level.
-  const auto *NS = Inputs.ASTSelection.commonAncestor()
-                       ->getDeclContext()
-                       .getEnclosingNamespaceContext();
-  if (auto *ND = dyn_cast<NamespaceDecl>(NS)) {
+  const DeclContext *ParentDeclCtx =
+      &Inputs.ASTSelection.commonAncestor()->getDeclContext();
+  while (ParentDeclCtx && !ParentDeclCtx->isFileContext()) {
+    ParentDeclCtx = ParentDeclCtx->getLexicalParent();
+  }
+  if (auto *ND = llvm::dyn_cast_or_null<NamespaceDecl>(ParentDeclCtx)) {
     auto Toks = Inputs.AST->getTokens().expandedTokens(ND->getSourceRange());
     const auto *Tok = llvm::find_if(Toks, [](const syntax::Token &Tok) {
       return Tok.kind() == tok::l_brace;
     });
     if (Tok == Toks.end() || Tok->endLocation().isInvalid()) {
-      return llvm::createStringError(llvm::inconvertibleErrorCode(),
-                                     "Namespace with no {");
+      return error("Namespace with no {");
     }
     if (!Tok->endLocation().isMacroID()) {
       InsertionPointData Out;
@@ -164,8 +185,7 @@ findInsertionPoint(const Tweak::Selection &Inputs,
   // top level decl.
   auto TLDs = Inputs.AST->getLocalTopLevelDecls();
   if (TLDs.empty()) {
-    return llvm::createStringError(llvm::inconvertibleErrorCode(),
-                                   "Cannot find place to insert \"using\"");
+    return error("Cannot find place to insert \"using\"");
   }
   InsertionPointData Out;
   Out.Loc = SM.getExpansionLoc(TLDs[0]->getBeginLoc());
@@ -173,8 +193,27 @@ findInsertionPoint(const Tweak::Selection &Inputs,
   return Out;
 }
 
+bool isNamespaceForbidden(const Tweak::Selection &Inputs,
+                          const NestedNameSpecifier &Namespace) {
+  std::string NamespaceStr = printNamespaceScope(*Namespace.getAsNamespace());
+
+  for (StringRef Banned : Config::current().Style.FullyQualifiedNamespaces) {
+    StringRef PrefixMatch = NamespaceStr;
+    if (PrefixMatch.consume_front(Banned) && PrefixMatch.consume_front("::"))
+      return true;
+  }
+
+  return false;
+}
+
 bool AddUsing::prepare(const Selection &Inputs) {
   auto &SM = Inputs.AST->getSourceManager();
+
+  // Do not suggest "using" in header files. That way madness lies.
+  if (isHeaderFile(SM.getFileEntryForID(SM.getMainFileID())->getName(),
+                   Inputs.AST->getLangOpts()))
+    return false;
+
   auto *Node = Inputs.ASTSelection.commonAncestor();
   if (Node == nullptr)
     return false;
@@ -202,13 +241,17 @@ bool AddUsing::prepare(const Selection &Inputs) {
     return false;
 
   if (auto *D = Node->ASTNode.get<DeclRefExpr>()) {
-    QualifierToRemove = D->getQualifierLoc();
-    Name = D->getDecl()->getName();
+    if (auto *II = D->getDecl()->getIdentifier()) {
+      QualifierToRemove = D->getQualifierLoc();
+      Name = II->getName();
+    }
   } else if (auto *T = Node->ASTNode.get<TypeLoc>()) {
     if (auto E = T->getAs<ElaboratedTypeLoc>()) {
-      QualifierToRemove = E.getQualifierLoc();
-      Name =
-          E.getType().getUnqualifiedType().getBaseTypeIdentifier()->getName();
+      if (auto *BaseTypeIdentifier =
+              E.getType().getUnqualifiedType().getBaseTypeIdentifier()) {
+        Name = BaseTypeIdentifier->getName();
+        QualifierToRemove = E.getQualifierLoc();
+      }
     }
   }
 
@@ -220,6 +263,9 @@ bool AddUsing::prepare(const Selection &Inputs) {
       Name.empty()) {
     return false;
   }
+
+  if (isNamespaceForbidden(Inputs, *QualifierToRemove.getNestedNameSpecifier()))
+    return false;
 
   // Macros are difficult. We only want to offer code action when what's spelled
   // under the cursor is a namespace qualifier. If it's a macro that expands to
@@ -243,9 +289,7 @@ Expected<Tweak::Effect> AddUsing::apply(const Selection &Inputs) {
   auto SpelledTokens = TB.spelledForExpanded(
       TB.expandedTokens(QualifierToRemove.getSourceRange()));
   if (!SpelledTokens) {
-    return llvm::createStringError(
-        llvm::inconvertibleErrorCode(),
-        "Could not determine length of the qualifier");
+    return error("Could not determine length of the qualifier");
   }
   unsigned Length =
       syntax::Token::range(SM, SpelledTokens->front(), SpelledTokens->back())
@@ -266,6 +310,9 @@ Expected<Tweak::Effect> AddUsing::apply(const Selection &Inputs) {
     std::string UsingText;
     llvm::raw_string_ostream UsingTextStream(UsingText);
     UsingTextStream << "using ";
+    if (InsertionPoint->AlwaysFullyQualify &&
+        !isFullyQualified(QualifierToRemove.getNestedNameSpecifier()))
+      UsingTextStream << "::";
     QualifierToRemove.getNestedNameSpecifier()->print(
         UsingTextStream, Inputs.AST->getASTContext().getPrintingPolicy());
     UsingTextStream << Name << ";" << InsertionPoint->Suffix;

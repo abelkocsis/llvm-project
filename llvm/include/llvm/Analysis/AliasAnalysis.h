@@ -349,6 +349,12 @@ public:
   IsCapturedCacheT IsCapturedCache;
 
   AAQueryInfo() : AliasCache(), IsCapturedCache() {}
+
+  AliasResult updateResult(const LocPair &Locs, AliasResult Result) {
+    auto It = AliasCache.find(Locs);
+    assert(It != AliasCache.end() && "Entry must have existed");
+    return It->second = Result;
+  }
 };
 
 class BatchAAResults;
@@ -847,6 +853,13 @@ public:
   FunctionModRefBehavior getModRefBehavior(const CallBase *Call) {
     return AA.getModRefBehavior(Call);
   }
+  bool isMustAlias(const MemoryLocation &LocA, const MemoryLocation &LocB) {
+    return alias(LocA, LocB) == MustAlias;
+  }
+  bool isMustAlias(const Value *V1, const Value *V2) {
+    return alias(MemoryLocation(V1, LocationSize::precise(1)),
+                 MemoryLocation(V2, LocationSize::precise(1))) == MustAlias;
+  }
 };
 
 /// Temporary typedef for legacy code that uses a generic \c AliasAnalysis
@@ -1185,8 +1198,8 @@ private:
   static void getModuleAAResultImpl(Function &F, FunctionAnalysisManager &AM,
                                     AAResults &AAResults) {
     auto &MAMProxy = AM.getResult<ModuleAnalysisManagerFunctionProxy>(F);
-    auto &MAM = MAMProxy.getManager();
-    if (auto *R = MAM.template getCachedResult<AnalysisT>(*F.getParent())) {
+    if (auto *R =
+            MAMProxy.template getCachedResult<AnalysisT>(*F.getParent())) {
       AAResults.addAAResult(*R);
       MAMProxy
           .template registerOuterAnalysisInvalidation<AnalysisT, AAManager>();

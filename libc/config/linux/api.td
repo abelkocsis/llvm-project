@@ -1,6 +1,8 @@
 include "config/public_api.td"
 
+include "spec/gnu_ext.td"
 include "spec/linux.td"
+include "spec/llvm_libc_ext.td"
 include "spec/posix.td"
 include "spec/stdc.td"
 
@@ -11,10 +13,23 @@ def SizeT : TypeDecl<"size_t"> {
   }];
 }
 
+def SSizeT : TypeDecl<"ssize_t"> {
+  let Decl = [{
+    #define __need_ssize_t
+    #include <__posix-types.h>
+  }];
+}
+
 def OffT : TypeDecl<"off_t"> {
   let Decl = [{
     #define __need_off_t
     #include <__posix-types.h>
+  }];
+}
+
+def FILE : TypeDecl<"FILE"> {
+  let Decl = [{
+    typedef struct FILE FILE;
   }];
 }
 
@@ -71,6 +86,9 @@ def AssertAPI : PublicAPI<"assert.h"> {
   ];
 }
 
+def CTypeAPI : PublicAPI<"ctype.h"> {
+}
+
 def MathErrHandlingMacro : MacroDef<"math_errhandling"> {
   let Defn = [{
     #ifndef math_errhandling
@@ -103,6 +121,20 @@ def IsNanMacro : MacroDef<"isnan"> {
   }];
 }
 
+def FloatT : TypeDecl<"float_t"> {
+  let Decl = [{
+    #define __need_float_t
+    #include <__llvm-libc-stdc-types.h>
+  }];
+}
+
+def DoubleT : TypeDecl<"double_t"> {
+  let Decl = [{
+    #define __need_double_t
+    #include <__llvm-libc-stdc-types.h>
+  }];
+}
+
 def MathAPI : PublicAPI<"math.h"> {
   let Macros = [
     SimpleMacroDef<"MATH_ERRNO", "1">,
@@ -112,41 +144,20 @@ def MathAPI : PublicAPI<"math.h"> {
     SimpleMacroDef<"INFINITY", "__builtin_inff()">,
     SimpleMacroDef<"NAN", "__builtin_nanf(\"\")">,
 
+    SimpleMacroDef<"FP_ILOGB0", "(-__INT_MAX__ - 1)">, // INT_MIN
+    SimpleMacroDef<"FP_ILOGBNAN", "__INT_MAX__">,
+
     IsFiniteMacro,
     IsInfMacro,
     IsNanMacro,
   ];
-  let Functions = [
-   "round",
+  let TypeDeclarations = [
+    DoubleT,
+    FloatT,
   ];
 }
 
 def StringAPI : PublicAPI<"string.h"> {
-  let Functions = [
-    "memcpy",
-    "memmove",
-    "memcmp",
-    "memchr",
-    "memset",
-    "strcpy",
-    "strncpy",
-    "strcat",
-    "strncat",
-    "strcmp",
-    "strcoll",
-    "strncmp",
-    "strxfrm",
-    "strchr",
-    "strcspn",
-    "strpbrk",
-    "strrchr",
-    "strspn",
-    "strstr",
-    "strtok",
-    "strerror",
-    "strlen",
-  ];
-
   let TypeDeclarations = [
     SizeT,
   ];
@@ -159,18 +170,11 @@ def StringAPI : PublicAPI<"string.h"> {
 def StdIOAPI : PublicAPI<"stdio.h"> {
   let TypeDeclarations = [
     SizeT,
-  ];
-
-  let Functions = [
-    "snprintf",
+    FILE,
   ];
 }
 
 def StdlibAPI : PublicAPI<"stdlib.h"> {
-  let Functions = [
-    "_Exit",
-    "abort",
-  ];
 }
 
 def ErrnoAPI : PublicAPI<"errno.h"> {
@@ -216,11 +220,6 @@ def SysMManAPI : PublicAPI<"sys/mman.h"> {
     SizeT,
     OffT,
   ];
-
-  let Functions = [
-    "mmap",
-    "munmap",
-  ];
 }
 
 def StructSigactionDefn : TypeDecl<"struct sigaction"> {
@@ -248,15 +247,12 @@ def SignalAPI : PublicAPI<"signal.h"> {
     StructSigactionDefn,
     SighandlerTDefn,
   ];
+}
 
-  let Functions = [
-    "raise",
-    "sigaction",
-    "sigprocmask",
-    "sigemptyset",
-    "sigaddset",
-    "signal",
-  ];
+def OnceFlag : TypeDecl<"once_flag"> {
+  let Decl = [{
+    typedef unsigned int once_flag;
+  }];
 }
 
 def MtxT : TypeDecl<"mtx_t"> {
@@ -272,8 +268,20 @@ def ThreadStartT : TypeDecl<"thrd_start_t"> {
   let Decl = "typedef int (*thrd_start_t)(void *);";
 }
 
+def CallOnceFuncT : TypeDecl<"__call_once_func_t"> {
+  let Decl = [{
+    typedef void(*__call_once_func_t)(void);
+  }];
+}
+
 def ThreadsAPI : PublicAPI<"threads.h"> {
+  let Macros = [
+    SimpleMacroDef<"ONCE_FLAG_INIT", "0">,
+  ];
+
   let TypeDeclarations = [
+    OnceFlag,
+    CallOnceFuncT,
     MtxT,
     ThreadStartT,
   ];
@@ -288,12 +296,11 @@ def ThreadsAPI : PublicAPI<"threads.h"> {
     "thrd_error",
     "thrd_nomem",
   ];
+}
 
-  let Functions = [
-    "mtx_init",
-    "mtx_lock",
-    "mtx_unlock",
-    "thrd_create",
-    "thrd_join",
+def UniStdAPI : PublicAPI<"unistd.h"> {
+  let TypeDeclarations = [
+    SSizeT,
+    SizeT,
   ];
 }

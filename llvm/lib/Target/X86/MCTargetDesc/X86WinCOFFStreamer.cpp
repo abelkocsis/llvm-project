@@ -28,7 +28,7 @@ public:
   void EmitWinEHHandlerData(SMLoc Loc) override;
   void EmitWindowsUnwindTables() override;
   void EmitCVFPOData(const MCSymbol *ProcSym, SMLoc Loc) override;
-  void FinishImpl() override;
+  void finishImpl() override;
 };
 
 void X86WinCOFFStreamer::EmitWinEHHandlerData(SMLoc Loc) {
@@ -52,13 +52,13 @@ void X86WinCOFFStreamer::EmitCVFPOData(const MCSymbol *ProcSym, SMLoc Loc) {
   XTS->emitFPOData(ProcSym, Loc);
 }
 
-void X86WinCOFFStreamer::FinishImpl() {
-  EmitFrames(nullptr);
+void X86WinCOFFStreamer::finishImpl() {
+  emitFrames(nullptr);
   EmitWindowsUnwindTables();
 
-  MCWinCOFFStreamer::FinishImpl();
+  MCWinCOFFStreamer::finishImpl();
 }
-}
+} // namespace
 
 MCStreamer *llvm::createX86WinCOFFStreamer(MCContext &C,
                                            std::unique_ptr<MCAsmBackend> &&AB,
