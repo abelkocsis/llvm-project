@@ -88,10 +88,10 @@ public:
 
     // C checks
     // CON
-    CheckFactories.registerCheck<bugprone::SignalInMultithreadedProgramCheck>(
-        "cert-con37-c");
     CheckFactories.registerCheck<bugprone::SpuriouslyWakeUpFunctionsCheck>(
         "cert-con36-c");
+    CheckFactories.registerCheck<bugprone::SignalInMultithreadedProgramCheck>(
+        "cert-con37-c");
     // DCL
     CheckFactories.registerCheck<misc::StaticAssertCheck>("cert-dcl03-c");
     CheckFactories.registerCheck<readability::UppercaseLiteralSuffixCheck>(

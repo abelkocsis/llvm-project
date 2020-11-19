@@ -21,7 +21,25 @@ namespace clang {
 namespace tidy {
 namespace bugprone {
 
-static Preprocessor *PP;
+namespace {
+class SignalInMultithreadedPPCallbacks : public PPCallbacks {
+public:
+  explicit SignalInMultithreadedPPCallbacks(
+      SignalInMultithreadedProgramCheck &Check, const SourceManager &SM,
+      Preprocessor *PP)
+      : Check(Check), PP(PP) {}
+  void MacroDefined(const Token &MacroNameTok,
+                    const MacroDirective *MD) override {
+    if (MacroNameTok.getIdentifierInfo()->getName() == "_POSIX_C_SOURCE") {
+      Check.IsCPosix = true;
+    }
+  }
+
+private:
+  SignalInMultithreadedProgramCheck &Check;
+  Preprocessor *PP;
+};
+} // namespace
 
 Matcher<FunctionDecl> hasAnyListedName(const std::string &FunctionNames) {
   const std::vector<std::string> NameList =
@@ -54,9 +72,9 @@ void SignalInMultithreadedProgramCheck::registerMatchers(MatchFinder *Finder) {
 
 void SignalInMultithreadedProgramCheck::check(
     const MatchFinder::MatchResult &Result) {
-  bool IsPosix = PP->isMacroDefined("_POSIX_C_SOURCE") ||
-                 Result.Context->getTargetInfo().getTriple().getVendor() ==
-                     llvm::Triple::Apple;
+  bool IsPosix =
+      IsCPosix || Result.Context->getTargetInfo().getTriple().getVendor() ==
+                      llvm::Triple::Apple;
   if (IsPosix)
     return;
   const auto *MatchedSignal = Result.Nodes.getNodeAs<CallExpr>("signal");
@@ -65,8 +83,9 @@ void SignalInMultithreadedProgramCheck::check(
 }
 
 void SignalInMultithreadedProgramCheck::registerPPCallbacks(
-    const SourceManager &SM, Preprocessor *pp, Preprocessor *ModuleExpanderPP) {
-  PP = pp;
+    const SourceManager &SM, Preprocessor *PP, Preprocessor *ModuleExpanderPP) {
+  PP->addPPCallbacks(
+      ::std::make_unique<SignalInMultithreadedPPCallbacks>(*this, SM, PP));
 }
 
 } // namespace bugprone
