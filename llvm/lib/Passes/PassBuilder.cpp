@@ -83,6 +83,7 @@
 #include "llvm/Transforms/Coroutines/CoroSplit.h"
 #include "llvm/Transforms/HelloNew/HelloWorld.h"
 #include "llvm/Transforms/IPO/AlwaysInliner.h"
+#include "llvm/Transforms/IPO/Annotation2Metadata.h"
 #include "llvm/Transforms/IPO/ArgumentPromotion.h"
 #include "llvm/Transforms/IPO/Attributor.h"
 #include "llvm/Transforms/IPO/BlockExtractor.h"
@@ -805,6 +806,11 @@ PassBuilder::buildFunctionSimplificationPipeline(OptimizationLevel Level,
   return FPM;
 }
 
+void PassBuilder::addRequiredLTOPreLinkPasses(ModulePassManager &MPM) {
+  MPM.addPass(CanonicalizeAliasesPass());
+  MPM.addPass(NameAnonGlobalPass());
+}
+
 void PassBuilder::addPGOInstrPasses(ModulePassManager &MPM,
                                     PassBuilder::OptimizationLevel Level,
                                     bool RunProfileGen, bool IsCS,
@@ -1326,6 +1332,9 @@ PassBuilder::buildPerModuleDefaultPipeline(OptimizationLevel Level,
 
   ModulePassManager MPM(DebugLogging);
 
+  // Convert @llvm.global.annotations to !annotation metadata.
+  MPM.addPass(Annotation2MetadataPass());
+
   // Force any function attributes we want the rest of the pipeline to observe.
   MPM.addPass(ForceFunctionAttrsPass());
 
@@ -1345,6 +1354,9 @@ PassBuilder::buildPerModuleDefaultPipeline(OptimizationLevel Level,
   // Emit annotation remarks.
   addAnnotationRemarksPass(MPM);
 
+  if (LTOPreLink)
+    addRequiredLTOPreLinkPasses(MPM);
+
   return MPM;
 }
 
@@ -1354,6 +1366,9 @@ PassBuilder::buildThinLTOPreLinkDefaultPipeline(OptimizationLevel Level) {
          "Must request optimizations for the default pipeline!");
 
   ModulePassManager MPM(DebugLogging);
+
+  // Convert @llvm.global.annotations to !annotation metadata.
+  MPM.addPass(Annotation2MetadataPass());
 
   // Force any function attributes we want the rest of the pipeline to observe.
   MPM.addPass(ForceFunctionAttrsPass());
@@ -1392,12 +1407,17 @@ PassBuilder::buildThinLTOPreLinkDefaultPipeline(OptimizationLevel Level) {
   // Emit annotation remarks.
   addAnnotationRemarksPass(MPM);
 
+  addRequiredLTOPreLinkPasses(MPM);
+
   return MPM;
 }
 
 ModulePassManager PassBuilder::buildThinLTODefaultPipeline(
     OptimizationLevel Level, const ModuleSummaryIndex *ImportSummary) {
   ModulePassManager MPM(DebugLogging);
+
+  // Convert @llvm.global.annotations to !annotation metadata.
+  MPM.addPass(Annotation2MetadataPass());
 
   if (ImportSummary) {
     // These passes import type identifier resolutions for whole-program
@@ -1450,6 +1470,9 @@ ModulePassManager
 PassBuilder::buildLTODefaultPipeline(OptimizationLevel Level,
                                      ModuleSummaryIndex *ExportSummary) {
   ModulePassManager MPM(DebugLogging);
+
+  // Convert @llvm.global.annotations to !annotation metadata.
+  MPM.addPass(Annotation2MetadataPass());
 
   if (Level == OptimizationLevel::O0) {
     // The WPD and LowerTypeTest passes need to run at -O0 to lower type
@@ -1690,13 +1713,35 @@ PassBuilder::buildLTODefaultPipeline(OptimizationLevel Level,
   return MPM;
 }
 
-void PassBuilder::runRegisteredEPCallbacks(ModulePassManager &MPM,
-                                           OptimizationLevel Level,
-                                           bool DebugLogging) {
+ModulePassManager PassBuilder::buildO0DefaultPipeline(OptimizationLevel Level,
+                                                      bool LTOPreLink) {
   assert(Level == OptimizationLevel::O0 &&
-         "runRegisteredEPCallbacks should only be used with O0");
+         "buildO0DefaultPipeline should only be used with O0");
+
+  ModulePassManager MPM(DebugLogging);
+
+  if (PGOOpt && (PGOOpt->Action == PGOOptions::IRInstr ||
+                 PGOOpt->Action == PGOOptions::IRUse))
+    addPGOInstrPassesForO0(
+        MPM,
+        /* RunProfileGen */ (PGOOpt->Action == PGOOptions::IRInstr),
+        /* IsCS */ false, PGOOpt->ProfileFile, PGOOpt->ProfileRemappingFile);
+
   for (auto &C : PipelineStartEPCallbacks)
     C(MPM, Level);
+
+  // Build a minimal pipeline based on the semantics required by LLVM,
+  // which is just that always inlining occurs. Further, disable generating
+  // lifetime intrinsics to avoid enabling further optimizations during
+  // code generation.
+  // However, we need to insert lifetime intrinsics to avoid invalid access
+  // caused by multithreaded coroutines.
+  MPM.addPass(AlwaysInlinerPass(
+      /*InsertLifetimeIntrinsics=*/PTO.Coroutines));
+
+  if (EnableMatrix)
+    MPM.addPass(createModuleToFunctionPassAdaptor(LowerMatrixIntrinsicsPass()));
+
   if (!LateLoopOptimizationsEPCallbacks.empty()) {
     LoopPassManager LPM(DebugLogging);
     for (auto &C : LateLoopOptimizationsEPCallbacks)
@@ -1736,8 +1781,25 @@ void PassBuilder::runRegisteredEPCallbacks(ModulePassManager &MPM,
     if (!FPM.isEmpty())
       MPM.addPass(createModuleToFunctionPassAdaptor(std::move(FPM)));
   }
+
+  if (PTO.Coroutines) {
+    MPM.addPass(createModuleToFunctionPassAdaptor(CoroEarlyPass()));
+
+    CGSCCPassManager CGPM(DebugLogging);
+    CGPM.addPass(CoroSplitPass());
+    CGPM.addPass(createCGSCCToFunctionPassAdaptor(CoroElidePass()));
+    MPM.addPass(createModuleToPostOrderCGSCCPassAdaptor(std::move(CGPM)));
+
+    MPM.addPass(createModuleToFunctionPassAdaptor(CoroCleanupPass()));
+  }
+
   for (auto &C : OptimizerLastEPCallbacks)
     C(MPM, Level);
+
+  if (LTOPreLink)
+    addRequiredLTOPreLinkPasses(MPM);
+
+  return MPM;
 }
 
 AAManager PassBuilder::buildDefaultAAPipeline() {
@@ -2298,33 +2360,10 @@ Error PassBuilder::parseModulePass(ModulePassManager &MPM,
                               .Case("O3", OptimizationLevel::O3)
                               .Case("Os", OptimizationLevel::Os)
                               .Case("Oz", OptimizationLevel::Oz);
-    if (L == OptimizationLevel::O0) {
-      // Add instrumentation PGO passes -- at O0 we can still do PGO.
-      if (PGOOpt && Matches[1] != "thinlto" &&
-          (PGOOpt->Action == PGOOptions::IRInstr ||
-           PGOOpt->Action == PGOOptions::IRUse))
-        addPGOInstrPassesForO0(
-            MPM,
-            /* RunProfileGen */ (PGOOpt->Action == PGOOptions::IRInstr),
-            /* IsCS */ false, PGOOpt->ProfileFile,
-            PGOOpt->ProfileRemappingFile);
-
-      // For IR that makes use of coroutines intrinsics, coroutine passes must
-      // be run, even at -O0.
-      if (PTO.Coroutines) {
-        MPM.addPass(createModuleToFunctionPassAdaptor(CoroEarlyPass()));
-
-        CGSCCPassManager CGPM(DebugLogging);
-        CGPM.addPass(CoroSplitPass());
-        CGPM.addPass(createCGSCCToFunctionPassAdaptor(CoroElidePass()));
-        MPM.addPass(createModuleToPostOrderCGSCCPassAdaptor(std::move(CGPM)));
-
-        MPM.addPass(createModuleToFunctionPassAdaptor(CoroCleanupPass()));
-      }
-
-      runRegisteredEPCallbacks(MPM, L, DebugLogging);
-
-      // Do nothing else at all!
+    if (L == OptimizationLevel::O0 && Matches[1] != "thinlto" &&
+        Matches[1] != "lto") {
+      MPM.addPass(buildO0DefaultPipeline(L, Matches[1] == "thinlto-pre-link" ||
+                                                Matches[1] == "lto-pre-link"));
       return Error::success();
     }
 
