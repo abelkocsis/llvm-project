@@ -30,7 +30,8 @@ public:
       : Check(Check), PP(PP) {}
   void MacroDefined(const Token &MacroNameTok,
                     const MacroDirective *MD) override {
-    if (MacroNameTok.getIdentifierInfo()->getName() == "_POSIX_C_SOURCE") {
+    const llvm::StringRef MacroName = MacroNameTok.getIdentifierInfo()->getName();
+    if (MacroName == "_POSIX_C_SOURCE" || MacroName == "__unix__") {
       Check.IsCPosix = true;
     }
   }
